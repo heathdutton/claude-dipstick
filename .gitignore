@@ -1,0 +1,10 @@
+.DS_Store
+__pycache__/
+
+# --keep-cast drops these beside the GIFs, where they would get committed by accident
+*.cast
+
+# Both scenarios are worth watching, but neither GIF ships: tiers.gif already shows the API-key case the README
+# needs from cost, and the pace marker is an inline chip now, which says what a week of animation was failing to.
+images/cost.gif
+images/week.gif
