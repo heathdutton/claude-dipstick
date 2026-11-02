@@ -94,6 +94,14 @@ if [ -f "$cj" ]; then
 else
   echo "  account -- no ~/.claude.json (profile hidden, usage hidden)"
 fi
+
+# From here every render reads a copy of this machine's config and account, so the line still looks like yours, but a
+# WEEKLY_BUDGET_USD in it books these fake sessions into the throwaway's ledger instead of your real week.
+mkdir -p "$WORK/home/.claude"
+[ -f "$config_local" ] && cp "$config_local" "$WORK/home/.claude/"
+[ -f "$cj" ] && cp "$cj" "$WORK/home/"
+HOME="$WORK/home"; export HOME
+
 echo ""
 echo "== render =="
 echo -n "  "
@@ -233,6 +241,10 @@ printf 'lastweek\t%s\t99999\n' "$((CLAUDE_STATUSLINE_NOW - 14 * 86400))" >> "$bu
 printf 'no-tabs-at-all\n' >> "$bud_ledger"
 printf 'bad\tNOTANUMBER\t500\n' >> "$bud_ledger"
 bud_want "$(bud b 30)" 55 "last week's rows and malformed ones ignored"
+# A session open across the boundary reports its whole cost, and only what it spent past last week's figure is this
+# week's. A week ago to the second is always last week, whatever day today is.
+CLAUDE_STATUSLINE_NOW=$((CLAUDE_STATUSLINE_NOW - 7 * 86400)) bud x 40 > /dev/null
+bud_want "$(bud x 41)" 56 "a session spanning the week boundary adds only this week's share"
 # Twenty windows rendering at once. Append-only is what makes this safe... read-modify-write loses rows here, and an
 # ended session never re-adds itself.
 rm -f "$bud_ledger"
@@ -286,6 +298,8 @@ bud_acct claude_max personal@example.test
 bud_want "$(bud p1 5)" 5 "switching accounts does not carry that spend over"
 bud_acct claude_enterprise work@acme.test
 bud_want "$(bud w2 30)" 70 "and the work week survives the round trip"
+bud_acct claude_ultra personal@example.test
+bud_want "$(bud p2 7)" 12 "a claude_ultra type keeps the week its claude_max name started"
 if grep -q '@' "$bud_ledger"; then
   echo "  FAIL -- an email address landed in the ledger"; exit 1
 else
@@ -358,6 +372,22 @@ mkdir -p "$WORK/repo/sub/deep"
 main_line="$(wt_render "$WORK/repo")"
 sub_line="$(wt_render "$WORK/repo/sub/deep")"
 wt_line="$(wt_render "$WORK/repo-TICKET-1")"
+# A subdirectory of a plain repo is the easy false positive. Below the root git returns an absolute --git-dir but a
+# relative --git-common-dir, so a raw string compare calls every subdir a worktree.
+case "$sub_line" in
+  *"$icon"*) echo "  FAIL -- subdirectory of a plain repo showed a worktree marker"; echo "    $sub_line"; exit 1 ;;
+  *)         echo "  OK -- plain repo subdirectory unmarked (${sub_line%%  *})" ;;
+esac
+case "$main_line" in
+  *"$icon"*) echo "  FAIL -- main checkout showed a worktree marker"; echo "    $main_line"; exit 1 ;;
+  *)         echo "  OK -- main checkout unmarked" ;;
+esac
+# Second element of the line, between the double-space separators, is the repo mark.
+wt_repo=${wt_line#*  }; wt_repo=${wt_repo%%  *}
+case "$wt_line" in
+  *"$icon"*) echo "  OK -- linked worktree marked: $wt_repo" ;;
+  *)         echo "  FAIL -- linked worktree unmarked"; echo "    $wt_line"; exit 1 ;;
+esac
 
 echo ""
 echo "== links and unpushed =="
@@ -520,19 +550,68 @@ case "$(HOME="$prof_home" bash "$ROOT/statusline.sh" <<< "$fit_payload")" in
 esac
 rm -rf "$prof_home"
 
-# A subdirectory of a plain repo is the case that used to false-positive. Below the root git returns an absolute
-# --git-dir but a relative --git-common-dir, so a raw string compare called every subdir a worktree.
-case "$sub_line" in
-  *"$icon"*) echo "  FAIL -- subdirectory of a plain repo showed a worktree marker"; echo "    $sub_line"; exit 1 ;;
-  *)         echo "  OK -- plain repo subdirectory unmarked (${sub_line%%  *})" ;;
+echo ""
+echo "== tier =="
+# Ultra is the 20x Max under its own name, and Claude Code reports it as claude_max on default_claude_max_20x, so the
+# tier string decides it. A claude_ultra type has to land on the same label and glyph, not the API-key fallback.
+tier_home="$WORK/tier"; mkdir -p "$tier_home/.claude"
+echo "PROFILE_STYLE=plan" > "$tier_home/.claude/statusline-config.local.txt"
+tier_is() {  # <organizationType> <tier> <config key of the glyph> <label>
+  local glyph out
+  glyph="$(cfg "$3")"
+  printf '{"oauthAccount":{"displayName":"A","emailAddress":"a@example.test","organizationType":"%s","organizationRateLimitTier":"%s"}}\n' \
+    "$1" "$2" > "$tier_home/.claude.json"
+  out="$(HOME="$tier_home" bash "$ROOT/statusline.sh" <<< "$fit_payload" | strip)"
+  case "$out" in
+    *"$glyph $4 "*) echo "  OK -- $1 on $2 reads $glyph $4" ;;
+    *) echo "  FAIL -- $1 on $2 (wanted $glyph $4): $out"; exit 1 ;;
+  esac
+}
+tier_is claude_max default_claude_max_20x PROFILE_ICON_ULTRA ULTRA
+tier_is claude_ultra default_claude_ultra PROFILE_ICON_ULTRA ULTRA
+tier_is claude_max default_claude_max_5x PROFILE_ICON_MAX MAX5
+tier_is claude_pro default_claude_pro PROFILE_ICON_PRO PRO
+
+echo ""
+echo "== hostile input =="
+# Typos in config, escapes in JSON, odd paths and other locales. Each of these once printed an error, hung, or drew
+# the wrong thing, and Claude Code shows nothing at all for a status line that misbehaves.
+host_home="$WORK/hostile"; mkdir -p "$host_home/.claude"
+cp "$WORK/sub/.claude.json" "$host_home/"   # a subscription, or the usage bars this needs never draw
+err="$(HOME="$host_home" BAR_WIDTH=09 LINK_ICON_TINT=08 BAR_TRACK_TINT=50% COLOR_MODE=singleColor SINGLE_COLOR=red \
+  EFFORT_LIT_COLOR=blue bash "$ROOT/statusline.sh" <<< "$fit_payload" 2>&1 >/dev/null)"
+[ -z "$err" ] && echo "  OK -- octal-looking numbers and named colors render without an error" \
+  || { echo "  FAIL -- config typos printed: $err"; exit 1; }
+
+agents='{"columns":120,"tasks":[{"id":"a1","name":"fixer","status":"running","description":"Fix the \"login\" bug","model":"claude-opus-5","effort":"max","tokenCount":50000,"contextWindowSize":200000}]}'
+row="$(HOME="$host_home" SUBAGENT_BAR_WIDTH=09 EFFORT_LIT_COLOR=blue bash "$ROOT/statusline.sh" <<< "$agents" \
+  | python3 -c 'import json,sys; print(json.loads(sys.stdin.readline())["content"])' 2>&1 | strip)"
+case "$row" in
+  *'Fix the "login" bug'*) echo "  OK -- agent rows stay JSON and unescape what they show" ;;
+  *) echo "  FAIL -- agent row: $row"; exit 1 ;;
 esac
-case "$main_line" in
-  *"$icon"*) echo "  FAIL -- main checkout showed a worktree marker"; echo "    $main_line"; exit 1 ;;
-  *)         echo "  OK -- main checkout unmarked" ;;
+
+# An edit with a relative path once spun the walk up for .git forever, and one outside every repo blanked the branch.
+mkdir -p "$WORK/repo/src" "$WORK/elsewhere"; touch "$WORK/repo/src/a.js" "$WORK/elsewhere/plan.md"
+edit_at() {  # <file_path> -> the line rendered from the plain repo with that as the last edit
+  printf '{"name":"Edit","input":{"file_path":"%s"}}\n' "$1" > "$WORK/hostile.jsonl"
+  (cd "$WORK/repo" && HOME="$host_home" perl -e 'alarm 5; exec @ARGV' bash "$ROOT/statusline.sh" \
+    <<< "${fit_payload/\"session_id\"/\"transcript_path\":\"$WORK/hostile.jsonl\",\"session_id\"}") | strip
+}
+case "$(edit_at src/a.js)" in
+  *main*) echo "  OK -- a relative path in the transcript falls back to the cwd" ;;
+  *) echo "  FAIL -- relative edit path hung or lost the branch"; exit 1 ;;
 esac
-# Second element of the line, between the double-space separators, is the repo mark.
-wt_repo=${wt_line#*  }; wt_repo=${wt_repo%%  *}
-case "$wt_line" in
-  *"$icon"*) echo "  OK -- linked worktree marked: $wt_repo" ;;
-  *)         echo "  FAIL -- linked worktree unmarked"; echo "    $wt_line"; exit 1 ;;
+case "$(edit_at "$WORK/elsewhere/plan.md")" in
+  *main*) echo "  OK -- an edit outside every repo keeps the cwd's branch" ;;
+  *) echo "  FAIL -- an edit outside every repo blanked the branch"; exit 1 ;;
+esac
+
+# %p is the locale's word, empty in de_DE, which once turned every morning reset into pm.
+morning=$(perl -MPOSIX -e 'my @t = localtime($ARGV[0]); print mktime(0, 50, 7, $t[3], $t[4], $t[5])' "$CLAUDE_STATUSLINE_NOW")
+de="$(HOME="$host_home" LC_ALL=de_DE.UTF-8 CLAUDE_STATUSLINE_NOW=$((morning - 3600)) bash "$ROOT/statusline.sh" \
+  < <(perl -pe "s/\"resets_at\":[0-9]+/\"resets_at\":$morning/g" <<< "$fit_payload") | strip)"
+case "$de" in
+  *7:50am*) echo "  OK -- a morning reset reads am under de_DE" ;;
+  *) echo "  FAIL -- morning reset under de_DE: $de"; exit 1 ;;
 esac

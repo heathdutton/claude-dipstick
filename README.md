@@ -128,19 +128,19 @@ level, so its row has no chevrons.
 
 ## Account, and what it costs
 
-![Max, Pro, Team, Enterprise, Free, then an API key](images/tiers.gif)
+![Ultra, Pro, Team, Enterprise, Free, then an API key](images/tiers.gif)
 
 The same session on six accounts, the tier glyph changing ahead of the name.
 
 | <img src="images/icons/tier-max.png" width="26" alt=""> | <img src="images/icons/tier-pro.png" width="26" alt=""> | <img src="images/icons/tier-team.png" width="26" alt=""> | <img src="images/icons/tier-enterprise.png" width="26" alt=""> | <img src="images/icons/tier-free.png" width="26" alt=""> | <img src="images/icons/tier-none.png" width="26" alt=""> |
 |---|---|---|---|---|---|
-| Max | Pro | Team | Enterprise | Free | API key |
+| Ultra, Max | Pro | Team | Enterprise | Free | API key |
 
 A glyph for the tier, text for the name, both linking to the usage page of whoever gets billed. An API key reports no
 windows at all, so the bars go and the cost turns up in their place.
 
 Cost shows where somebody is accounting for it. An API key, a metered spend limit, or a team seat. Hidden on a personal
-Max or Pro, where the number is noise. `SHOW_COST=always` overrides.
+Ultra, Max or Pro, where the number is noise. `SHOW_COST=always` overrides.
 
 Set `WEEKLY_BUDGET_USD` and a fourth bar appears, fed by a local tally in `~/.claude/statusline-spend.tsv`. This Mac
 only, and only sessions that rendered... a gauge, not an invoice.
