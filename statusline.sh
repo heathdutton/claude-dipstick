@@ -23,7 +23,7 @@ case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
 esac
 
 # Sourced first, so each line of the table below is that key's default and nothing else has to hold one. An exported key
-# wins over both, which falls out of the same form and makes a one-off `BAR_WIDTH=20 bash statusline.sh` work.
+# beats the default too, so a one-off `BAR_WIDTH=20 bash statusline.sh` works, but the local file beats both.
 [ -f "$HOME/.claude/statusline-config.local.txt" ] && source "$HOME/.claude/statusline-config.local.txt"
 
 show_model="${SHOW_MODEL-1}"
@@ -190,11 +190,10 @@ bar_caps="${BAR_CAPS-powerline}"
 context_as_tokens="${CONTEXT_AS_TOKENS-0}"
 show_usage="${SHOW_USAGE-1}"
 # This session's cost, just ahead of the session bar it was spent in and in that bar's color. Claude Code computes it
-# client-side at list price whoever is paying, so on a Max or Pro login it is what the session would have cost, not a
-# bill.
+# client-side at list price whoever is paying, so on a subscription it is what the session would have cost, not a bill.
 #   billed   where somebody is accounting for it: an API-key account, a gateway metering a spend limit, or an
-#            enterprise/team seat, where usage is attributed and charged back. Hidden on a personal Max or Pro,
-#            where the plan flatly covers the session and the number is noise.  (default)
+#            enterprise/team seat, where usage is attributed and charged back. Hidden on a personal Ultra, Max or
+#            Pro, where the plan flatly covers the session and the number is noise.  (default)
 #   always   the list-price figure regardless
 #   never
 #
@@ -254,13 +253,14 @@ profile_name="${PROFILE_NAME-}"
 # PROFILE_STYLE picks what that label says:
 #   name       displayName, or the email local-part if it is unset  (default)
 #   email      the email local-part
-#   plan       the subscription: MAX20, PRO, TEAM, ENT, FREE
+#   plan       the subscription: ULTRA, MAX5, PRO, TEAM, ENT, FREE
 #   name+plan  both, space separated
 profile_style="${PROFILE_STYLE-name}"
 # The tier as a glyph, ahead of the label. The default style is the name alone, so this is the only place the tier
-# shows... icon says what kind of account, text says whose. Blank one to drop it for that tier. md-crown,
-# md-account_circle, md-account_group, md-office_building, md-account, md-account_outline (the fallback, and what an
-# API-key account with no oauthAccount gets).
+# shows... icon says what kind of account, text says whose. Blank one to drop it for that tier. md-crown for Ultra and
+# Max alike, md-account_circle, md-account_group, md-office_building, md-account, md-account_outline (the fallback,
+# and what an API-key account with no oauthAccount gets).
+profile_icon_ultra="${PROFILE_ICON_ULTRA-󰆥}"
 profile_icon_max="${PROFILE_ICON_MAX-󰆥}"
 profile_icon_pro="${PROFILE_ICON_PRO-󰀉}"
 profile_icon_team="${PROFILE_ICON_TEAM-󰡉}"
@@ -290,20 +290,29 @@ element_color_pace="${ELEMENT_COLOR_PACE-}"
 element_color_weekly="${ELEMENT_COLOR_WEEKLY-}"
 element_color_extra="${ELEMENT_COLOR_EXTRA-}"
 
-# Anything unparseable in the width keys falls back rather than tripping the arithmetic below. BAR_WIDTH is either
-# "auto" or a cell count.
-case "$bar_width" in auto|[0-9]*) ;; *) bar_width=auto ;; esac
-case "$bar_width" in *[!0-9a-z]*) bar_width=auto ;; esac
-case "$bar_width_min" in ''|*[!0-9]*) bar_width_min=10 ;; esac
-case "$bar_width_max" in ''|*[!0-9]*) bar_width_max=64 ;; esac
-case "$bar_fit_margin" in ''|*[!0-9]*) bar_fit_margin=5 ;; esac
-case "$effort_chevron_fade" in ''|*[!0-9]*) effort_chevron_fade=45 ;; esac
-case "$effort_chevron_dim" in ''|*[!0-9]*) effort_chevron_dim=35 ;; esac
-case "$cache_held_tint" in ''|*[!0-9]*) cache_held_tint=45 ;; esac
-case "$cache_warn_at" in ''|*[!0-9]*) cache_warn_at=25 ;; esac
-[ "$cache_warn_at" -gt 100 ] && cache_warn_at=100
-case "$subagent_bar_width" in ''|*[!0-9]*) subagent_bar_width=10 ;; esac
-case "$link_icon_tint" in ''|*[!0-9]*) link_icon_tint=60 ;; esac
+# Anything unparseable in the numeric keys falls back rather than tripping $(( )), and a leading zero is stripped
+# because $(( )) reads 08 as a bad octal. Percentages cap at 100.
+uint_or() {  # <var name> <fallback> [max] -> the var as plain decimal, or the fallback
+  local v=${!1}
+  case "$v" in ''|*[!0-9]*) v=$2 ;; esac
+  v=$((10#$v))
+  [ -n "${3:-}" ] && [ "$v" -gt "$3" ] && v=$3
+  printf -v "$1" '%d' "$v"
+}
+case "$bar_width" in auto) ;; ''|*[!0-9]*) bar_width=auto ;; *) uint_or bar_width 0 ;; esac
+uint_or bar_width_min 10
+uint_or bar_width_max 64
+uint_or bar_fit_margin 5
+uint_or subagent_bar_width 10
+uint_or cache_warn_at 25 100
+uint_or effort_chevron_fade 45 100
+uint_or effort_chevron_dim 35 100
+uint_or cache_held_tint 45 100
+uint_or link_icon_tint 60 100
+uint_or pace_marker_tint 55 100
+uint_or bar_track_tint 30 100
+uint_or effort_pill_tint 18 100
+uint_or effort_dim_tint 55 100
 # What underline a link wears, and why the list is only two long.
 #
 # Claude Code doesn't hand the line to the terminal as written. It parses it into a model of its own and re-serialises,
@@ -314,7 +323,6 @@ case "$link_underline" in
   straight) link_underline_sgr="4" ;;
   *)        link_underline_sgr="" ;;   # none
 esac
-case "$pace_marker_tint" in ''|*[!0-9]*) pace_marker_tint=55 ;; esac
 
 # Digits the bars print with. Hack has the superscripts, not the subscripts, so "sub" leans on fallback to a face that
 # does... Menlo on a Mac, same Bitstream Vera lineage, so the metrics match. Without one they are tofu.
@@ -345,24 +353,20 @@ fmt_short_time() {  # <epoch> <with_day 0|1> -> sets short_time
     return
   fi
   if [ "$2" = "1" ]; then
-    raw=$(epoch_fmt "$1" "+%a %I:%M %p")
+    raw=$(epoch_fmt "$1" "+%a %H:%M")
     day=${raw%% *}
     raw=${raw#* }
   else
-    raw=$(epoch_fmt "$1" "+%I:%M %p")
+    raw=$(epoch_fmt "$1" "+%H:%M")
   fi
   short_time=""
   [ -n "$raw" ] || return
-  h=${raw%%:*}
-  ap=${raw##* }
+  # am/pm from the 24-hour clock, since %p is the locale's word for it: a.m. in en_GB, nothing at all in de_DE.
+  h=$((10#${raw%%:*}))
   m=${raw#*:}
-  m=${m%% *}
-  h=${h#0}
-  [ -n "$h" ] || h=12
-  case "$ap" in
-    AM|am) ap=am ;;
-    *)     ap=pm ;;
-  esac
+  if [ "$h" -ge 12 ]; then ap=pm; else ap=am; fi
+  h=$((h % 12))
+  [ "$h" -gt 0 ] || h=12
   if [ "$m" = "00" ]; then
     short_time="${h}${ap}"
   else
@@ -400,6 +404,15 @@ plain_width() {  # <string> -> pw, cells once the SGR and OSC 8 sequences are re
 # No underline by default: color already marks the element, and the only rule Claude Code can carry is the harsh solid
 # one. Closed inside the link so it can't bleed onto whatever the caller appends.
 linked=""
+# The characters a branch name or a folder can hold that would end or garble the URL around them. Slashes stay, since
+# both are paths.
+urled=""
+url_enc() {  # <text> -> urled
+  local u=${1//\%/%25}
+  u=${u// /%20}; u=${u//\#/%23}; u=${u//\?/%3F}; u=${u//\&/%26}; u=${u//+/%2B}
+  urled=$u
+}
+
 link() {  # <url> <text> -> linked
   if [ "$links" != "1" ] || [ -z "$1" ]; then
     linked=$2
@@ -587,7 +600,7 @@ reset_epoch_of() {  # resets_at -> epoch seconds, or empty if it isn't one
 #
 #   name       displayName, or the email local-part if it is unset  (default)
 #   email      the email local-part
-#   plan       the subscription: MAX20, PRO, TEAM, ENT, FREE
+#   plan       the subscription: ULTRA, MAX5, PRO, TEAM, ENT, FREE
 #   name+plan  both, space separated
 claude_json="$HOME/.claude.json"
 
@@ -614,48 +627,55 @@ $(grep -oE '"(displayName|emailAddress|organizationType|organizationRateLimitTie
 EOF
 fi
 
-# organizationType is claude_max / claude_pro / claude_team / claude_enterprise. Matched loosely so a renamed or unseen
-# tier lands somewhere sensible instead of blanking the label.
-plan_label() {
-  [ -n "$acct_type" ] || return 0
-  local base mult
-  case "$acct_type" in
-    *enterprise*) base="ENT" ;;
-    *team*)       base="TEAM" ;;
-    *max*)        base="MAX" ;;
-    *pro*)        base="PRO" ;;
-    *free*)       base="FREE" ;;
-    *)            base=$(printf '%s' "${acct_type#claude_}" | tr '[:lower:]' '[:upper:]') ;;
-  esac
-  # default_claude_max_20x -> MAX20. A tier with no multiplier just drops it.
-  mult=$(printf '%s' "$acct_tier" | sed -n 's/.*_\([0-9][0-9]*\)x$/\1/p')
-  printf '%s%s' "$base" "$mult"
-}
+# organizationType is claude_max / claude_pro / claude_team / claude_enterprise, matched loosely so an unseen type lands
+# somewhere sensible instead of blanking the label. Ultra is the 20x Max under its own name: Claude Code reports it as
+# claude_max on default_claude_max_20x, and a claude_ultra type reads the same. Read once for the label and the glyph.
+#
+# The glyph is worth its own mark, not a repeat of the label: the default style prints only the name, so the tier is
+# otherwise not on screen. Text says who, icon says what kind.
+acct_plan=""
+plan_mark=$profile_icon_default   # also an API key's, which has no oauthAccount at all
+case "$acct_type" in
+  *enterprise*) acct_plan=enterprise; plan_mark=$profile_icon_enterprise ;;
+  *team*)       acct_plan=team;       plan_mark=$profile_icon_team ;;
+  *ultra*)      acct_plan=ultra;      plan_mark=$profile_icon_ultra ;;
+  *max*)        acct_plan=max;        plan_mark=$profile_icon_max
+                case "$acct_tier" in *_20x) acct_plan=ultra; plan_mark=$profile_icon_ultra ;; esac ;;
+  *pro*)        acct_plan=pro;        plan_mark=$profile_icon_pro ;;
+  *free*)       acct_plan=free;       plan_mark=$profile_icon_free ;;
+  ?*)           acct_plan=other ;;
+esac
 
-# The same tiers as a glyph. Worth its own mark, not a repeat of the label: the default style prints only the name, so
-# the tier is otherwise not on screen. Text says who, icon says what kind.
-plan_icon() {
-  case "$acct_type" in
-    *enterprise*) printf '%s' "$profile_icon_enterprise" ;;
-    *team*)       printf '%s' "$profile_icon_team" ;;
-    *max*)        printf '%s' "$profile_icon_max" ;;
-    *pro*)        printf '%s' "$profile_icon_pro" ;;
-    *free*)       printf '%s' "$profile_icon_free" ;;
-    # An API-key account has no oauthAccount, so acct_type is empty and this lands on the neutral outline.
-    *)            printf '%s' "$profile_icon_default" ;;
+plan_label() {  # -> plan_name
+  local mult=""
+  case "$acct_plan" in
+    enterprise) plan_name=ENT ;;
+    team)       plan_name=TEAM ;;
+    ultra)      plan_name=ULTRA ;;
+    max)        plan_name=MAX ;;
+    pro)        plan_name=PRO ;;
+    free)       plan_name=FREE ;;
+    other)      plan_name=$(printf '%s' "${acct_type#claude_}" | tr '[:lower:]' '[:upper:]') ;;
+    *)          plan_name=""; return 0 ;;
   esac
+  # default_claude_max_5x -> MAX5. Ultra's multiplier is in the name, and a tier without one just drops it.
+  case "$acct_plan/$acct_tier" in
+    ultra/*) ;;
+    */*_[0-9]*x) mult=${acct_tier##*_}; mult=${mult%x}; case "$mult" in *[!0-9]*) mult="" ;; esac ;;
+  esac
+  plan_name=$plan_name$mult
 }
 
 if [ -z "${profile_name:-}" ]; then
   case "${profile_style:-name}" in
     plan)
-      profile_name=$(plan_label) ;;
+      plan_label; profile_name=$plan_name ;;
     email)
       profile_name="${acct_email%%@*}" ;;
     name+plan)
       profile_name="${acct_name:-${acct_email%%@*}}"
-      profile_plan=$(plan_label)
-      [ -n "$profile_plan" ] && profile_name="${profile_name:+$profile_name }$profile_plan" ;;
+      plan_label
+      [ -n "$plan_name" ] && profile_name="${profile_name:+$profile_name }$plan_name" ;;
     *)
       profile_name="${acct_name:-${acct_email%%@*}}" ;;
   esac
@@ -790,7 +810,14 @@ fi
 # runs 13 times a render.
 ansi=""
 hex_to_ansi() {
-  local hex=${1#\#}
+  local hex=${1#\#} x='[[:xdigit:]]'
+  # #abc is shorthand for #aabbcc. A name or a typo gets mid grey, since 16#zz is an arithmetic error that would take
+  # the whole element with it.
+  case "$hex" in
+    $x$x$x)          hex=${hex:0:1}${hex:0:1}${hex:1:1}${hex:1:1}${hex:2:1}${hex:2:1} ;;
+    $x$x$x$x$x$x) ;;
+    *)               hex=808080 ;;
+  esac
   printf -v ansi '\033[38;2;%d;%d;%dm' \
     "$((16#${hex:0:2}))" "$((16#${hex:2:2}))" "$((16#${hex:4:2}))"
 }
@@ -1142,6 +1169,12 @@ json_escape() {  # <string> -> jsoned
   j=${j//\\/\\\\}; j=${j//\"/\\\"}; j=${j//$'\033'/\\u001b}; j=${j//$'\a'/\\u0007}; j=${j//$'\n'/\\n}; j=${j//$'\t'/\\t}
   jsoned=$j
 }
+unjsoned=""
+json_unescape() {  # <JSON string body> -> unjsoned, with the escapes a name or description carries undone
+  local j=${1//\\\\/$'\001'}
+  j=${j//\\\"/\"}; j=${j//\\\//\/}; j=${j//\\n/ }; j=${j//\\t/ }; j=${j//\\r/}
+  unjsoned=${j//$'\001'/\\}
+}
 if [ "$payload_is_subagent" = 1 ]; then
   sa_cols=${payload_columns:-80}
   case "$sa_cols" in ''|*[!0-9]*) sa_cols=80 ;; esac
@@ -1151,20 +1184,22 @@ if [ "$payload_is_subagent" = 1 ]; then
   sa_lead_width=$(( subagent_bar_width + 8 ))
   sa_pad="                    "
   sa_emit() {
-    local pct=0 color lead="" avail text row
+    local pct=0 color lead="" hex="" avail text row
     if [ -n "$sa_ctx" ] && [ "$sa_ctx" -gt 0 ] && [ -n "$sa_tokens" ]; then
       pct=$(( sa_tokens * 100 / sa_ctx )); [ "$pct" -gt 100 ] && pct=100
     fi
     if [ "$pct" -le 25 ]; then color="$CYAN"; elif [ "$pct" -le 34 ]; then color="$YELLOW"
     elif [ "$pct" -le 44 ]; then color="$LEVEL_8"; else color="$LEVEL_10"; fi
     case "$sa_model" in
-      *mythos*) lead="$model_mark_mythos" ;;
-      *opus*)   lead="$model_mark_opus" ;;
-      *fable*)  lead="$model_mark_fable" ;;
-      *sonnet*) lead="$model_mark_sonnet" ;;
-      *haiku*)  lead="$model_mark_haiku" ;;
+      *mythos*) lead="$model_mark_mythos"; hex=$model_color_mythos ;;
+      *opus*)   lead="$model_mark_opus";   hex=$model_color_opus ;;
+      *fable*)  lead="$model_mark_fable";  hex=$model_color_fable ;;
+      *sonnet*) lead="$model_mark_sonnet"; hex=$model_color_sonnet ;;
+      *haiku*)  lead="$model_mark_haiku";  hex=$model_color_haiku ;;
     esac
+    # model_color only matters to EFFORT_LIT_COLOR=family, which wants the family's own hue as on the main line.
     context_color="$color"; model_color="$color"
+    if [ -n "$hex" ] && [ "$color_mode" != "monochrome" ]; then hex_to_ansi "$hex"; model_color=$ansi; fi
     build_effort "$sa_effort"
     bar_width=$subagent_bar_width
     if [ -n "$effort_ramp" ] && [ -n "$effort_join_bg" ] && [ -n "$bar_cap_arrow" ]; then
@@ -1187,8 +1222,9 @@ if [ "$payload_is_subagent" = 1 ]; then
     if [ "$avail" -gt 1 ] && [ ${#text} -gt "$avail" ]; then text="${text:0:$((avail - 1))}…"; fi
     [ "$avail" -gt 1 ] || text=""
     row="${row}  ${sa_name}${text:+  ${GRAY}${text}${RESET}}"
+    json_escape "$sa_id"; text=$jsoned
     json_escape "$row"
-    printf '{"id":"%s","content":"%s"}\n' "$sa_id" "$jsoned"
+    printf '{"id":"%s","content":"%s"}\n' "$text" "$jsoned"
   }
   # Per-task fields arrive in document order, and a task starts at its "id".
   while IFS= read -r sf; do
@@ -1196,20 +1232,22 @@ if [ "$payload_is_subagent" = 1 ]; then
       '"id":"'*)          [ -n "$sa_id" ] && sa_emit
                           sf=${sf#*:\"}; sa_id=${sf%\"}
                           sa_name=""; sa_status=""; sa_desc=""; sa_model=""; sa_effort=""; sa_ctx=""; sa_tokens="" ;;
-      '"name":"'*)        sf=${sf#*:\"}; sa_name=${sf%\"} ;;
+      '"name":"'*)        sf=${sf#*:\"}; json_unescape "${sf%\"}"; sa_name=$unjsoned ;;
       '"status":"'*)      sf=${sf#*:\"}; sa_status=${sf%\"} ;;
-      '"description":"'*) sf=${sf#*:\"}; sa_desc=${sf%\"} ;;
+      '"description":"'*) sf=${sf#*:\"}; json_unescape "${sf%\"}"; sa_desc=$unjsoned ;;
       '"model":"'*)       sf=${sf#*:\"}; sa_model=${sf%\"} ;;
       '"effort":"'*)      sf=${sf#*:\"}; sa_effort=${sf%\"} ;;
       '"contextWindowSize":'*) sa_ctx=${sf##*:} ;;
       '"tokenCount":'*)   sa_tokens=${sf##*:} ;;
     esac
   done <<EOF
-$(printf '%s' "$input" | grep -oE '"(id|name|status|description|model|effort)":"[^"]*"|"(contextWindowSize|tokenCount)":[0-9]+')
+$(printf '%s' "$input" | grep -oE '"(id|name|status|description|model|effort)":"([^"\\]|\\.)*"|"(contextWindowSize|tokenCount)":[0-9]+')
 EOF
   [ -n "$sa_id" ] && sa_emit
   exit 0
 fi
+# A $(( )) error inside that block abandons it before its exit, and the agent panel would get the main line instead.
+[ "$payload_is_subagent" = 1 ] && exit 0
 
 # Build components (without separators)
 
@@ -1232,12 +1270,50 @@ if [ "$show_active_repo" = "1" ] && [ -n "$payload_transcript" ]; then
   # grep, not awk. Same scan, and awk isn't close: 57ms vs 5ms on that file, 835ms vs 13ms on the largest transcript
   # here (60MB). Even that worst case is affordable once a render, so there's no cache to keep coherent.
   active_file=$(grep -o \
-    '"name":"\(Edit\|Write\|MultiEdit\|NotebookEdit\)","input":{[^}]*"file_path":"[^"]*"' \
+    '"name":"\(Edit\|Write\|MultiEdit\|NotebookEdit\)","input":{[^}]*"\(file\|notebook\)_path":"[^"]*"' \
     "$payload_transcript" 2>/dev/null | tail -1)
-  active_file=${active_file##*\"file_path\":\"}
+  active_file=${active_file##*_path\":\"}
   active_file=${active_file%\"}
-  [ -n "$active_file" ] && [ -e "$active_file" ] && git_ctx=${active_file%/*}
+  case "$active_file" in
+    /*) [ -e "$active_file" ] && git_ctx=${active_file%/*} ;;
+  esac
 fi
+
+# Root, worktree-ness and branch, without running git.
+#
+# git rev-parse and git branch cost ~10ms each, and every answer sits in the filesystem in plain text:
+#
+#   .git is a directory  -> ordinary checkout
+#   .git is a FILE       -> "gitdir: <path>", relative to the file's own folder when not absolute. A linked worktree
+#                           if that git-dir has a commondir, a submodule if not.
+#   <gitdir>/HEAD        -> "ref: refs/heads/<branch>", or a bare sha when detached
+#
+# Walk up for .git, read two files. No forks, and it works where git isn't on PATH.
+git_toplevel=""
+git_gitdir=""
+git_is_worktree=0
+find_git() {  # <dir> -> git_toplevel, git_gitdir, git_is_worktree; fails when no repo encloses dir
+  local d=$1 link
+  git_toplevel=""; git_gitdir=""; git_is_worktree=0
+  while [ -n "$d" ] && [ "$d" != "/" ]; do
+    if [ -d "$d/.git" ]; then
+      git_toplevel=$d; git_gitdir=$d/.git
+      return 0
+    elif [ -f "$d/.git" ]; then
+      IFS= read -r link < "$d/.git" 2>/dev/null
+      case "$link" in "gitdir: "*) ;; *) return 1 ;; esac
+      git_toplevel=$d; git_gitdir=${link#gitdir: }
+      case "$git_gitdir" in /*) ;; *) git_gitdir=$d/$git_gitdir ;; esac
+      [ -f "$git_gitdir/commondir" ] && git_is_worktree=1
+      return 0
+    fi
+    case "$d" in */*) d=${d%/*} ;; *) return 1 ;; esac
+  done
+  return 1
+}
+
+# An edit outside every repo, a plan under ~/.claude or a scratch file in /tmp, says nothing about which one you're in.
+[ -n "$git_ctx" ] && ! find_git "$git_ctx" && git_ctx=""
 if [ -z "$git_ctx" ] && [ -d "$session_dir/repos" ]; then
   repo_count=0
   for repo_link in "$session_dir"/repos/*; do
@@ -1248,44 +1324,20 @@ if [ -z "$git_ctx" ] && [ -d "$session_dir/repos" ]; then
   # More than one and there is nothing to choose between them.
   [ "$repo_count" -eq 1 ] || git_ctx=""
 fi
+if [ -z "$git_ctx" ] || ! find_git "$git_ctx"; then
+  git_ctx=""
+  find_git "$current_dir_path"
+fi
 
-# Root, worktree-ness and branch, without running git.
-#
-# git rev-parse and git branch cost ~10ms each, and every answer sits in the filesystem in plain text:
-#
-#   .git is a directory  -> ordinary checkout
-#   .git is a FILE       -> linked worktree, holding "gitdir: <path>"
-#   <gitdir>/HEAD        -> "ref: refs/heads/<branch>", or a bare sha when detached
-#
-# Walk up for .git, read two files. No forks, and it works where git isn't on PATH.
-git_toplevel=""
-git_gitdir=""
-git_is_worktree=0
 git_branch=""
-walk_dir="${git_ctx:-$current_dir_path}"
-while [ -n "$walk_dir" ] && [ "$walk_dir" != "/" ]; do
-  if [ -d "$walk_dir/.git" ]; then
-    git_toplevel="$walk_dir"
-    git_gitdir="$walk_dir/.git"
-    break
-  elif [ -f "$walk_dir/.git" ]; then
-    IFS= read -r git_link < "$walk_dir/.git" 2>/dev/null
-    case "$git_link" in
-      "gitdir: "*)
-        git_toplevel="$walk_dir"
-        git_gitdir=${git_link#gitdir: }
-        git_is_worktree=1
-        ;;
-    esac
-    break
-  fi
-  walk_dir=${walk_dir%/*}
-done
 if [ -n "$git_gitdir" ] && [ -r "$git_gitdir/HEAD" ]; then
   IFS= read -r git_head < "$git_gitdir/HEAD" 2>/dev/null
   case "$git_head" in
     "ref: refs/heads/"*) git_branch=${git_head#ref: refs/heads/} ;;
   esac
+  # A reftable repo leaves HEAD as a stub naming .invalid, and the real ref sits in a binary table only git can read.
+  [ "$git_branch" = ".invalid" ] && \
+    git_branch=$(GIT_OPTIONAL_LOCKS=0 git -C "$git_toplevel" symbolic-ref --short -q HEAD 2>/dev/null)
 fi
 
 # Refs and config live in the common dir: the git-dir itself for a plain checkout, and for a linked worktree wherever
@@ -1321,12 +1373,20 @@ git_host=""; git_path=""
 if [ -n "$git_origin" ]; then
   git_u=${git_origin%/}; git_u=${git_u%.git}
   case "$git_u" in
-    *://*) git_u=${git_u#*://}; git_u=${git_u#*@}; git_host=${git_u%%/*}; git_path=${git_u#*/} ;;
+    http://*|https://*)
+           git_u=${git_u#*://}; git_u=${git_u#*@}; git_host=${git_u%%/*}; git_path=${git_u#*/} ;;
+    *://*) git_u=${git_u#*://}; git_u=${git_u#*@}; git_host=${git_u%%/*}; git_path=${git_u#*/}
+           git_host=${git_host%%:*} ;;   # an SSH port, which says nothing about the web one
     *@*:*) git_u=${git_u#*@};   git_host=${git_u%%:*}; git_path=${git_u#*:} ;;
     *:*)                        git_host=${git_u%%:*}; git_path=${git_u#*:} ;;
   esac
-  git_host=${git_host%%:*}   # a port, if any
   git_path=${git_path#/}
+  # The SSH-over-443 endpoints serve no web pages. Their sites are the plain hosts.
+  case "$git_host" in
+    ssh.github.com)          git_host=github.com ;;
+    altssh.bitbucket.org)    git_host=bitbucket.org ;;
+    vs-ssh.visualstudio.com) git_host=ssh.dev.azure.com ;;
+  esac
 fi
 
 # The branch's page on that host. GitHub, GitLab (any host with gitlab in the name, so self-hosted too), Bitbucket Cloud
@@ -1334,7 +1394,7 @@ fi
 # BRANCH_LINK_TEMPLATE overrides the lot with {host} {path} {branch}.
 git_branch_url=""
 if [ "$links" = "1" ] && [ -n "$git_host" ] && [ -n "$git_path" ] && [ -n "$git_branch" ]; then
-  git_b=${git_branch//\#/%23}
+  url_enc "$git_branch"; git_b=$urled
   if [ -n "$branch_link_template" ]; then
     git_branch_url=$branch_link_template
     git_branch_url=${git_branch_url//\{host\}/$git_host}
@@ -1345,7 +1405,9 @@ if [ "$links" = "1" ] && [ -n "$git_host" ] && [ -n "$git_path" ] && [ -n "$git_
       github.com|*github*)             git_branch_url="https://$git_host/$git_path/tree/$git_b" ;;
       *gitlab*)                        git_branch_url="https://$git_host/$git_path/-/tree/$git_b" ;;
       bitbucket.org)                   git_branch_url="https://bitbucket.org/$git_path/branch/$git_b" ;;
-      *bitbucket*)                     git_branch_url="https://$git_host/projects/${git_path%%/*}/repos/${git_path#*/}/browse?at=refs/heads/$git_b" ;;
+      *bitbucket*)                     git_bb=${git_path#scm/}   # HTTPS clone URLs carry /scm/, the web ones don't
+                                       git_branch_url="https://$git_host/projects/${git_bb%%/*}/repos/${git_bb#*/}"
+                                       git_branch_url="$git_branch_url/browse?at=refs/heads/$git_b" ;;
       codeberg.org|*gitea*|*forgejo*)  git_branch_url="https://$git_host/$git_path/src/branch/$git_b" ;;
       ssh.dev.azure.com)               git_az=${git_path#v3/}; git_branch_url="https://dev.azure.com/${git_az%%/*}/${git_az#*/}"
                                        git_branch_url="${git_branch_url%/*}/_git/${git_branch_url##*/}?version=GB$git_b" ;;
@@ -1371,7 +1433,7 @@ if [ "$show_unpushed" = "1" ] && [ -n "$git_branch" ] && [ -n "$git_common" ]; t
         *" refs/remotes/$git_remote/$git_branch")  [ -n "$git_remote_sha" ] || git_remote_sha=${git_pl%% *} ;;
       esac
     done <<EOF
-$(grep -E " refs/(heads|remotes/$git_remote)/$git_branch\$" "$git_common/packed-refs" 2>/dev/null)
+$(grep -F -e " refs/heads/$git_branch" -e " refs/remotes/$git_remote/$git_branch" "$git_common/packed-refs" 2>/dev/null)
 EOF
   fi
   [ -n "$git_local_sha" ] && [ "$git_local_sha" != "$git_remote_sha" ] && git_unpushed=1
@@ -1400,14 +1462,13 @@ dir_label=${session_dir##*/}
 [ -n "$dir_label" ] || dir_label="$current_dir"
 if [ "$dir_style" = "basename" ]; then
   dir_label="$current_dir"
-elif [ "$dir_style" = "repo" ] && [ -n "$git_toplevel" ] && [ -z "$git_ctx" ]; then
+elif [ "$dir_style" = "repo" ] && [ -n "$git_toplevel" ] && [ "$git_foreign" = 0 ]; then
+  # Logical paths on both sides, the same ones the walk up for .git used, so a symlinked /tmp still matches.
   repo_name=${git_toplevel##*/}
-  phys_cwd=$(cd "$current_dir_path" 2>/dev/null && pwd -P)
-  [ -n "$phys_cwd" ] || phys_cwd="$current_dir_path"
-  if [ "$phys_cwd" = "$git_toplevel" ]; then
+  if [ "$current_dir_path" = "$git_toplevel" ]; then
     dir_label="$repo_name"
-  elif [ "${phys_cwd#"$git_toplevel"/}" != "$phys_cwd" ]; then
-    rel="${phys_cwd#"$git_toplevel"/}"
+  elif [ "${current_dir_path#"$git_toplevel"/}" != "$current_dir_path" ]; then
+    rel="${current_dir_path#"$git_toplevel"/}"
     case "$rel" in
       */*/*) dir_label="$repo_name/…/${rel##*/}" ;;
       *)     dir_label="$repo_name/$rel" ;;
@@ -1415,9 +1476,10 @@ elif [ "$dir_style" = "repo" ] && [ -n "$git_toplevel" ] && [ -z "$git_ctx" ]; t
   fi
 fi
 if [ "$show_dir" = "1" ]; then
-  # Cmd-click opens the folder in Finder. Spaces are the one thing a path has that a URL can't.
+  # Cmd-click opens the folder in Finder.
   glyph_label "$dir_icon" "$dir_label" "$BLUE"
-  link "file://${session_dir// /%20}" "$glyphed"
+  url_enc "$session_dir"
+  link "file://$urled" "$glyphed"
   dir_text="${BLUE}${linked}${RESET}"
 fi
 
@@ -1430,9 +1492,11 @@ fi
 repo_text=""
 if [ "$show_branch" = "1" ] && [ -n "$git_toplevel" ]; then
   # Either form links to the branch page, and carries the unpushed mark when the remote is behind or has never seen it.
-  if [ "$git_is_worktree" = "1" ] || [ -n "$payload_worktree" ]; then
+  # The payload's worktree is the cwd's, so it names nothing when the repo shown is one found elsewhere.
+  git_wt_name=""; [ "$git_foreign" = 1 ] || git_wt_name=$payload_worktree
+  if [ "$git_is_worktree" = "1" ] || [ -n "$git_wt_name" ]; then
     # The worktree directory name already carries the ticket, so it needs no branch beside it.
-    glyph_label "$worktree_icon" "${payload_worktree:-${git_toplevel##*/}}" "$TEAL"
+    glyph_label "$worktree_icon" "${git_wt_name:-${git_toplevel##*/}}" "$TEAL"
     link "$git_branch_url" "$glyphed"
     repo_text="${TEAL}${linked}${git_unpushed_mark}${RESET}"
   elif [ -n "$git_branch" ]; then
@@ -1457,7 +1521,9 @@ if [ "$show_git_status" = "1" ] && [ -n "$git_toplevel" ]; then
   # back empty with no git on PATH, on a repo git refuses for dubious ownership (2.35.2+, common on a shared or
   # mounted checkout), and on a corrupt index. Reading empty as clean painted a green tick over every one of those,
   # which is worse than saying nothing, because a tick is a claim.
-  if git_st=$(git -C "$git_toplevel" status --porcelain 2>/dev/null); then
+  # GIT_OPTIONAL_LOCKS=0 skips the index refresh, which takes index.lock and would fail a `git commit` landing
+  # mid-render.
+  if git_st=$(GIT_OPTIONAL_LOCKS=0 git -C "$git_toplevel" status --porcelain 2>/dev/null); then
     if [ -z "$git_st" ]; then
       status_text="${GREEN}${git_clean_icon}${RESET}"
     else
@@ -1628,7 +1694,6 @@ fi
 # subscription's windows live on claude.ai, an API key's spend in the Console. PROFILE_URL overrides both.
 profile_text=""
 if [ "$show_profile" = "1" ] && [ -n "$profile_name" ]; then
-  profile_mark=$(plan_icon)
   profile_href="$profile_url"
   if [ -z "$profile_href" ]; then
     if [ "$account_is_subscription" = "1" ]; then
@@ -1637,7 +1702,7 @@ if [ "$show_profile" = "1" ] && [ -n "$profile_name" ]; then
       profile_href="https://console.anthropic.com/settings/usage"
     fi
   fi
-  glyph_label "$profile_mark" "$profile_name" "$MAGENTA"
+  glyph_label "$plan_mark" "$profile_name" "$MAGENTA"
   link "$profile_href" "$glyphed"
   profile_text="${MAGENTA}${linked}${RESET}"
 fi
@@ -1869,10 +1934,10 @@ fi
 #   enterprise   an org seat, where usage gets attributed and charged back
 #   team         same
 #
-# and hides it on a personal Max or Pro, where the plan flatly covers the session and the number is noise. That split is
-# what makes this follow an account swap on its own. Lumping every subscription together instead would mean a work seat
-# needed SHOW_COST=always, and that flag then puts a meaningless figure on screen the moment the login changes.
-# `always` and `never` force it either way.
+# and hides it on a personal Ultra, Max or Pro, where the plan flatly covers the session and the number is noise. That
+# split is what makes this follow an account swap on its own. Lumping every subscription together instead would mean a
+# work seat needed SHOW_COST=always, and that flag then puts a meaningless figure on screen the moment the login
+# changes. `always` and `never` force it either way.
 case "$show_cost" in
   0|never)  cost_applies=0 ;;
   1|always) cost_applies=1 ;;
@@ -1892,6 +1957,7 @@ fmt_money() {  # <usd float> -> money: whole dollars, empty under 0.50
   [ -n "$int" ] || int=0
   frac="${frac}0"
   case "$int$frac" in *[!0-9]*) return ;; esac
+  int=$((10#$int))
   [ "${frac:0:1}" -ge 5 ] && int=$((int + 1))
   [ "$int" -gt 0 ] && money=$int
 }
@@ -1902,7 +1968,7 @@ cents_of() {  # <usd float> -> cents, integer, truncated; empty if it isn't a nu
   [ -n "$int" ] || int=0
   frac="${frac}00"
   case "$int$frac" in *[!0-9]*) return ;; esac
-  cents=$((int * 100 + 10#${frac:0:2}))
+  cents=$((10#$int * 100 + 10#${frac:0:2}))
 }
 fmt_cents() {  # <cents> -> money, the same whole dollars fmt_money gives
   money=""
@@ -2030,10 +2096,17 @@ fi
 # APPEND-ONLY, because several sessions render at once. Read-merge-write races and loses rows, and an ended session
 # never re-adds itself, so the week drifts down silently. One O_APPEND write of one short line doesn't interleave.
 #
-# Rewrites only compact, past LEDGER_MAX rows or once last week's rows are in the file, through a temp file and rename
-# so a concurrent reader sees old or new, never half. A row appended in that window comes back next render. None of it
-# exists till WEEKLY_BUDGET_USD is set.
+# LAST WEEK'S ROWS STAY one more week, counted for nothing but a baseline. A session left open across the boundary
+# reports its whole cost, and only what it spent past last week's figure belongs to this one. A figure below the
+# baseline means the process restarted, and then all of it is new.
+#
+# Rewrites only compact, once the file holds rows older than that, or past LEDGER_MAX rows when at least half are
+# superseded. Through a temp file and rename, so a concurrent reader sees old or new, never half. A row appended in that
+# window comes back next render. None of it exists till WEEKLY_BUDGET_USD is set.
 LEDGER_MAX=64
+week_part() {  # <cents so far> <cents before week_start> -> part, the share spent since week_start
+  if [ "$1" -ge "$2" ]; then part=$(( $1 - $2 )); else part=$1; fi
+}
 budget_text=""
 budget_bar=0
 if [ "$show_budget" = "1" ] && [ -n "$weekly_budget_usd" ]; then
@@ -2052,8 +2125,9 @@ EOF
     cents_of "${payload_cost:-0}"; session_cents=${cents:-0}
 
     # Who the row belongs to. FNV-1a over the account identity, in pure bash: eight lines beats a fork, and a hash keeps
-    # the address out of a file that is easy to cat. An API-key login has no oauthAccount and gets "apikey".
-    acct_ident="${acct_type}|${acct_email}"
+    # the address out of a file that is easy to cat. An API-key login has no oauthAccount and gets "apikey". A
+    # claude_ultra type hashes as the claude_max it renames, so the account keeps its week whichever one is reported.
+    acct_ident="${acct_type/claude_ultra/claude_max}|${acct_email}"
     if [ "$acct_ident" = "|" ]; then
       acct_key=apikey
     else
@@ -2069,18 +2143,25 @@ EOF
     fi
 
     ledger="$HOME/.claude/statusline-spend.tsv"
-    ledger_accts=(); ledger_ids=(); ledger_amts=(); ledger_seen=()
-    ledger_rows=0; ledger_stale=0; stored_self=-1
+    prev_week_start=$((week_start - 7 * 86400))
+    # Per session: the latest figure since week_start and its stamp, and the latest before it. Either can be missing.
+    ledger_accts=(); ledger_ids=(); ledger_amts=(); ledger_seen=(); ledger_base=(); ledger_base_seen=()
+    ledger_rows=0; ledger_stale=0; stored_self=-1; self_base=0; self_base_seen=""
     if [ -r "$ledger" ]; then
       while IFS="	" read -r l_acct l_id l_seen l_cents; do
         [ -n "$l_acct" ] && [ -n "$l_id" ] || continue
         # A row this cannot parse is a row worth rewriting away, which is also how the pre-account 3-column format
         # retires itself: every old row lands here once and the next compaction drops it.
         case "$l_seen$l_cents" in ''|*[!0-9]*) ledger_stale=1; continue ;; esac
-        if [ "$l_seen" -lt "$week_start" ]; then ledger_stale=1; continue; fi
+        l_seen=$((10#$l_seen)); l_cents=$((10#$l_cents))
+        if [ "$l_seen" -lt "$prev_week_start" ]; then ledger_stale=1; continue; fi
         ledger_rows=$((ledger_rows + 1))
+        l_prev=0; [ "$l_seen" -lt "$week_start" ] && l_prev=1
+        if [ "$l_acct" = "$acct_key" ] && [ "$l_id" = "$payload_session" ]; then
+          if [ "$l_prev" = 1 ]; then self_base=$l_cents; self_base_seen=$l_seen; else stored_self=$l_cents; fi
+          continue
+        fi
         # Another account's row is carried through compaction untouched and left out of the sum.
-        if [ "$l_acct" = "$acct_key" ] && [ "$l_id" = "$payload_session" ]; then stored_self=$l_cents; continue; fi
         l_i=0; l_n=${#ledger_ids[@]}
         while [ "$l_i" -lt "$l_n" ]; do
           [ "${ledger_accts[$l_i]}" = "$l_acct" ] && [ "${ledger_ids[$l_i]}" = "$l_id" ] && break
@@ -2088,21 +2169,31 @@ EOF
         done
         ledger_accts[$l_i]=$l_acct
         ledger_ids[$l_i]=$l_id
-        ledger_amts[$l_i]=$l_cents
-        ledger_seen[$l_i]=$l_seen
+        if [ "$l_prev" = 1 ]; then
+          ledger_base[$l_i]=$l_cents; ledger_base_seen[$l_i]=$l_seen
+        else
+          ledger_amts[$l_i]=$l_cents; ledger_seen[$l_i]=$l_seen
+        fi
       done < "$ledger"
     fi
     spent_cents=0
+    ledger_keep=0
     l_i=0; l_n=${#ledger_ids[@]}
     while [ "$l_i" -lt "$l_n" ]; do
-      [ "${ledger_accts[$l_i]}" = "$acct_key" ] && spent_cents=$((spent_cents + ledger_amts[l_i]))
+      [ -n "${ledger_base[$l_i]:-}" ] && ledger_keep=$((ledger_keep + 1))
+      if [ -n "${ledger_amts[$l_i]:-}" ]; then
+        ledger_keep=$((ledger_keep + 1))
+        if [ "${ledger_accts[$l_i]}" = "$acct_key" ]; then
+          week_part "${ledger_amts[$l_i]}" "${ledger_base[$l_i]:-0}"; spent_cents=$((spent_cents + part))
+        fi
+      fi
       l_i=$((l_i + 1))
     done
     # A resumed session re-reports from zero, so take the larger of stored and payload. A fresh payload must not walk
     # the week's number backwards.
     [ "$stored_self" -gt "$session_cents" ] && session_cents=$stored_self
     if [ -n "$payload_session" ]; then
-      spent_cents=$((spent_cents + session_cents))
+      week_part "$session_cents" "$self_base"; spent_cents=$((spent_cents + part))
       # One appended line, only when the figure moved. A session still at zero has nothing to record.
       if [ "$session_cents" -gt 0 ] && [ "$stored_self" != "$session_cents" ] \
          && [ -d "$HOME/.claude" ]; then
@@ -2111,20 +2202,30 @@ EOF
         ledger_rows=$((ledger_rows + 1))
       fi
     fi
-    if [ "$ledger_stale" = 1 ] || [ "$ledger_rows" -gt "$LEDGER_MAX" ]; then
+    # Twice what compaction would keep, so a week with more live sessions than LEDGER_MAX doesn't rewrite every render.
+    if [ "$ledger_stale" = 1 ] || { [ "$ledger_rows" -gt "$LEDGER_MAX" ] \
+         && [ "$ledger_rows" -gt $(( (ledger_keep + 2) * 2 )) ]; }; then
       if [ -d "$HOME/.claude" ]; then
         ledger_tmp="${ledger}.$$"
         {
           l_i=0; l_n=${#ledger_ids[@]}
           while [ "$l_i" -lt "$l_n" ]; do
-            # Its own seen time, not now. That stamp prunes the row at the top of next week, and refreshing it here
-            # would outlive the week it belongs to.
-            printf '%s\t%s\t%s\t%s\n' "${ledger_accts[$l_i]}" "${ledger_ids[$l_i]}" \
-              "${ledger_seen[$l_i]}" "${ledger_amts[$l_i]}"
+            # Its own seen time, not now. That stamp prunes the row on schedule, and refreshing it here would outlive
+            # the week it belongs to.
+            [ -n "${ledger_base[$l_i]:-}" ] && printf '%s\t%s\t%s\t%s\n' "${ledger_accts[$l_i]}" \
+              "${ledger_ids[$l_i]}" "${ledger_base_seen[$l_i]}" "${ledger_base[$l_i]}"
+            [ -n "${ledger_amts[$l_i]:-}" ] && printf '%s\t%s\t%s\t%s\n' "${ledger_accts[$l_i]}" \
+              "${ledger_ids[$l_i]}" "${ledger_seen[$l_i]}" "${ledger_amts[$l_i]}"
             l_i=$((l_i + 1))
           done
-          [ -n "$payload_session" ] && [ "$session_cents" -gt 0 ] && \
-            printf '%s\t%s\t%s\t%s\n' "$acct_key" "$payload_session" "$now_epoch" "$session_cents"
+          if [ -n "$payload_session" ]; then
+            [ -n "$self_base_seen" ] && \
+              printf '%s\t%s\t%s\t%s\n' "$acct_key" "$payload_session" "$self_base_seen" "$self_base"
+            [ "$session_cents" -gt 0 ] && \
+              printf '%s\t%s\t%s\t%s\n' "$acct_key" "$payload_session" "$now_epoch" "$session_cents"
+          fi
+          # The block's status is what decides the rename, and a session at zero cost is no reason to skip it.
+          true
         } > "$ledger_tmp" 2>/dev/null \
           && mv -f "$ledger_tmp" "$ledger" 2>/dev/null
         rm -f "$ledger_tmp" 2>/dev/null
@@ -2419,7 +2520,8 @@ EOF
     if [ -n "$task_active" ] && [ -r "$task_active" ]; then
       while IFS= read -r tl; do
         case "$tl" in
-          *'"activeForm":'*) tl=${tl#*\"activeForm\":}; tl=${tl#*\"}; task_cur=${tl%\"*}; break ;;
+          *'"activeForm":'*) tl=${tl#*\"activeForm\":}; tl=${tl#*\"}; json_unescape "${tl%\"*}"; task_cur=$unjsoned
+                             break ;;
         esac
       done < "$task_active"
     fi

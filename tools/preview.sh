@@ -16,7 +16,7 @@
 # recording, put back on exit). GIF options: --gif [DIR], --font FAMILY, --font-size PX, --tail S (the pause before the
 # loop restarts), --captions / --no-captions, --keep-cast.
 #
-# Runs the real statusline.sh against synthetic payloads in a throwaway HOME, with a made-up account ("Heath", Max 20x)
+# Runs the real statusline.sh against synthetic payloads in a throwaway HOME, with a made-up account ("Heath", Ultra)
 # and a scratch git repo, so nothing on screen is yours. Frames render up front at the window's real width, read from
 # the tty, then play back at a steady rate, so render time never paces playback.
 #
@@ -272,7 +272,7 @@ s_week() {
   frame claude-opus-5 high 32 88 $(( 6 * 86400 + 3000 )) 96 0 0 "$APP" "" "$hold"
 }
 s_tiers() {
-  caption="Account tier as a glyph: Max, Pro, Team, Enterprise, Free, and an API key, which has no windows."
+  caption="Account tier as a glyph: Ultra, Pro, Team, Enterprise, Free, and an API key, which has no windows."
   local t
   for t in "claude_max default_claude_max_20x" "claude_pro default_claude_pro" "claude_team default_claude_team" \
            "claude_enterprise default_enterprise" "claude_free default_free"; do

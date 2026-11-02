@@ -62,7 +62,8 @@ if command -v python3 >/dev/null 2>&1; then
   echo "  settings.json -- $(python3 "$HERE/enable.py" 2>&1 || echo 'left alone (see above)')"
 else
   echo "  no python3 -- add this to ~/.claude/settings.json by hand:"
-  echo '      "statusLine": { "type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"" }'
+  echo '      "statusLine":         { "type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"", "refreshInterval": 60 },'
+  echo '      "subagentStatusLine": { "type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"" }'
 fi
 
 echo

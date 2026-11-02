@@ -60,8 +60,10 @@ def main() -> int:
     data["subagentStatusLine"] = DESIRED_SUBAGENT
     settings.write_text(json.dumps(data, indent=2) + "\n")
 
-    if current:
-        print(f"replaced {current.get('command', current)!r}")
+    if current == DESIRED:
+        print("added subagentStatusLine")
+    elif current:
+        print(f"replaced {current.get('command', current) if isinstance(current, dict) else current!r}")
     else:
         print("enabled")
     return 0
