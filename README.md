@@ -113,10 +113,19 @@ fill, so it reads at both ends.
 
 ### The chevrons are the effort
 
-![each level named as it renders, one chevron through five](images/effort.gif)
+![each level named as it renders, one chevron through five, then ultracode at xhigh](images/effort.gif)
 
-Haiku sends no effort level, so it gets no chevrons. Ultracode gets none either and can't. Claude Code folds it to
-`xhigh` before anything here can read it.
+Haiku sends no effort level, so it gets no chevrons.
+
+### The fan-out is ultracode
+
+<img src="images/icons/ultracode.png" width="26" alt=""> after the chevrons, one node branching to three, means
+ultracode is on and the model's been told to run a workflow for anything substantive. It's a switch, not a sixth
+level, so it sits beside whatever level you're at.
+
+Claude Code leaves it out of the status line payload, so it's read off the transcript, the same way Claude Code reads
+its own state. Flip it in `/effort` and it shows with your next prompt, which is when it takes effect anyway.
+`SHOW_ULTRACODE=0` drops it, `ULTRACODE_ICON` and `ULTRACODE_COLOR` restyle it.
 
 ## Subagents
 

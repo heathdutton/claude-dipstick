@@ -30,8 +30,8 @@ SIZE, RADIUS, INSET = 128, 26, 26
 CHIP_BG = (35, 37, 35, 255)
 
 # Each chip takes the color that element wears on the line, so it reads as a zoomed crop rather than a new palette.
-CYAN, GREEN, PLUM, AMBER, BLUE, RED, TRACK = (
-    "#4DD0E1", "#66BB6A", "#C77DBB", "#FFA726", "#7986CB", "#EF5350", "#5A6A6E")
+CYAN, GREEN, PLUM, AMBER, BLUE, RED, TRACK, VIOLET = (
+    "#4DD0E1", "#66BB6A", "#C77DBB", "#FFA726", "#7986CB", "#EF5350", "#5A6A6E", "#D0B4FF")
 
 # (file name, config key in statusline.sh, color)
 FROM_CONFIG = [
@@ -40,6 +40,7 @@ FROM_CONFIG = [
     ("model-opus", "MODEL_MARK_OPUS", CYAN),
     ("model-sonnet", "MODEL_MARK_SONNET", CYAN),
     ("model-haiku", "MODEL_MARK_HAIKU", CYAN),
+    ("ultracode", "ULTRACODE_ICON", VIOLET),
     ("tier-max", "PROFILE_ICON_MAX", PLUM),
     ("tier-pro", "PROFILE_ICON_PRO", PLUM),
     ("tier-team", "PROFILE_ICON_TEAM", PLUM),

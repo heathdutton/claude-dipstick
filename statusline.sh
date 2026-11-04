@@ -85,6 +85,11 @@ effort_label_medium="${EFFORT_LABEL_MEDIUM-}"
 effort_label_high="${EFFORT_LABEL_HIGH-H}"
 effort_label_xhigh="${EFFORT_LABEL_XHIGH-X}"
 effort_label_max="${EFFORT_LABEL_MAX-M}"
+# Ultracode is a switch beside the level, not a step past max, so it's a shape after the run rather than a sixth
+# chevron. md-sitemap U+F04AA, one node fanning out to three, in the violet Claude Code paints the keyword with.
+show_ultracode="${SHOW_ULTRACODE-1}"
+ultracode_icon="${ULTRACODE_ICON-󰒪}"
+ultracode_color="${ULTRACODE_COLOR-#D0B4FF}"
 show_dir="${SHOW_DIRECTORY-1}"
 # session = the folder claude started in, the one word that means anything when it sits a few levels deep. repo = path
 # relative to the git root. basename = just the folder.
@@ -1263,20 +1268,41 @@ fi
 #   3. the cwd, right everywhere else.
 session_dir="${payload_project_dir:-$current_dir_path}"
 git_ctx=""
-if [ "$show_active_repo" = "1" ] && [ -n "$payload_transcript" ]; then
+ultracode_on=0
+if [ -n "$payload_transcript" ] && { [ "$show_active_repo" = "1" ] || [ "$show_ultracode" = "1" ]; }; then
   # The whole file, not its tail. The edits that matter are often thousands of turns back... in a real ticket session
   # the last 256KB of a 2.7MB transcript held no edit at all and the answer sat near the start.
   #
-  # grep, not awk. Same scan, and awk isn't close: 57ms vs 5ms on that file, 835ms vs 13ms on the largest transcript
-  # here (60MB). Even that worst case is affordable once a render, so there's no cache to keep coherent.
-  active_file=$(grep -o \
-    '"name":"\(Edit\|Write\|MultiEdit\|NotebookEdit\)","input":{[^}]*"\(file\|notebook\)_path":"[^"]*"' \
-    "$payload_transcript" 2>/dev/null | tail -1)
-  active_file=${active_file##*_path\":\"}
-  active_file=${active_file%\"}
-  case "$active_file" in
-    /*) [ -e "$active_file" ] && git_ctx=${active_file%/*} ;;
-  esac
+  # Ultracode isn't in the payload. Claude Code attaches ultra_effort_enter to the prompt that turns it on, again every
+  # so many prompts while it stays on, and ultra_effort_exit once it's off, then reads its own state off the last one.
+  # So does this, which is why the mark lands with the next prompt rather than the /effort toggle.
+  #
+  # One perl slurp answers both. BSD grep runs ~160MB/s and a second pattern is a second pass: grep alone took 30ms on
+  # a 2MB transcript and 460ms on a 72MB one, perl does both in 18ms and 45ms. Fast enough that there's no cache to
+  # keep coherent. Without perl, grep still finds the edit and ultracode stays dark.
+  #
+  # On stdin, not as a path. Endpoint security (Jamf Protect, measured) holds `perl -e` opening a big file by name for
+  # ~400ms at 5% CPU, and a redirect bash opens costs nothing extra.
+  if command -v perl >/dev/null 2>&1; then
+    transcript_last=$(LC_ALL=C perl -e 'local $/; my $t = <STDIN>; my ($u, $e) = ("", "");
+      $u = $1 while $t =~ /"attachment":\{"type":"ultra_effort_(e[nx])/g;
+      $e = $1 while $t =~ /"name":"(?:Edit|Write|MultiEdit|NotebookEdit)","input":\{
+                           [^}]*"(?:file|notebook)_path":"([^"]*)"/gx;
+      print "$u\t$e"' 2>/dev/null < "$payload_transcript")
+  else
+    transcript_last=$'\t'$(grep -o \
+      '"name":"\(Edit\|Write\|MultiEdit\|NotebookEdit\)","input":{[^}]*"\(file\|notebook\)_path":"[^"]*"' \
+      "$payload_transcript" 2>/dev/null | tail -1)
+  fi
+  [ "$show_ultracode" = "1" ] && [ "${transcript_last%%$'\t'*}" = "en" ] && ultracode_on=1
+  if [ "$show_active_repo" = "1" ]; then
+    active_file=${transcript_last#*$'\t'}
+    active_file=${active_file##*_path\":\"}
+    active_file=${active_file%\"}
+    case "$active_file" in
+      /*) [ -e "$active_file" ] && git_ctx=${active_file%/*} ;;
+    esac
+  fi
 fi
 
 # Root, worktree-ness and branch, without running git.
@@ -1618,6 +1644,7 @@ if [ "$show_context" = "1" ]; then
 fi
 
 model_text=""
+ultra_mark=""
 if [ "$show_model" = "1" ] && [ -n "$model" ]; then
   model_id="$payload_model_id"
 
@@ -1686,8 +1713,17 @@ if [ "$show_model" = "1" ] && [ -n "$model" ]; then
 
   build_effort "$effort"
 
+  # Spaced off the run, whose last arrow points straight at it. Not gated on the run either: ultracode isn't a level, so
+  # a model with no effort dial still shows it.
+  if [ "$ultracode_on" = 1 ] && [ -n "$ultracode_icon" ]; then
+    ansi=""
+    [ "$color_mode" = "monochrome" ] || hex_to_ansi "$ultracode_color"
+    ultra_mark=" ${ansi}${ultracode_icon}${RESET}"
+  fi
+
   # Appended here and lifted back out by the context block, so effort survives when the meter isn't rendering.
-  model_text="${model_color}${model_display}${RESET}${effort_ramp}${effort_ramp:+${RESET}${effort_cap_fg}${effort_close_glyph}}${RESET}"
+  model_text="${model_color}${model_display}${RESET}${effort_ramp}"
+  model_text="${model_text}${effort_ramp:+${RESET}${effort_cap_fg}${effort_close_glyph}}${RESET}${ultra_mark}"
 fi
 
 # Cmd-click opens that account's usage page, where the two window bars come from. Which page depends on who bills: a
@@ -1734,11 +1770,13 @@ if [ "$show_context" = "1" ]; then
     # there would eat the meter.
     ctx_lead=""
     ctx_trail=""
+    ctx_ultra=""
     if [ "$model_in_context" = "1" ] && [ "$show_context_bar" = "1" ] \
        && [ "$show_model" = "1" ] && [ "$model_style" = "glyph" ] && [ -n "$model_display" ]; then
       # Shape says which model, fill says how much context is gone, the run says how hard it's being pushed.
       ctx_lead="$model_display"
       ctx_trail="$effort_ramp"
+      ctx_ultra="$ultra_mark"
       model_text=""
     fi
 
@@ -1748,12 +1786,13 @@ if [ "$show_context" = "1" ]; then
       # arrow cap and the run picks it up, either the first chevron's band or the pill's floor. Needs backgrounds to
       # hand off... without them (blocks, monochrome, caps off) the ramp is just appended.
       ctx_pill_bg=""
-      ctx_pill_cap=""
+      ctx_pill_cap="$RESET"
       if [ -n "$ctx_trail" ] && [ -n "$effort_join_bg" ] && [ -n "$bar_cap_arrow" ]; then
         ctx_pill_bg="$effort_join_bg"
         # Chevrons close themselves and leave this a bare RESET. The pill's hemisphere gets drawn here.
         ctx_pill_cap="${RESET}${effort_cap_fg}${effort_close_glyph}${RESET}"
       fi
+      ctx_pill_cap="${ctx_pill_cap}${ctx_ultra}"
       # Drawn in the layout pass below, once the bar has a width.
       ctx_bar=1
     else
@@ -2344,7 +2383,7 @@ fit_bars() {  # -> bar_width, from COLUMNS less everything that is not a bar
   if [ -z "$cache_text" ] && [ "$show_cache" = 1 ] && [ -z "$payload_cache_observed" ]; then
     used=$((used + 1)); elements=$((elements + 1))
   fi
-  # A bar is its caps plus whatever hangs off the right one: the effort pill, or a window's reset time.
+  # A bar is its caps plus whatever hangs off the right one: the effort run and ultracode, or a window's reset time.
   if [ "$ctx_bar" = 1 ]; then
     plain_width "$ctx_trail"; used=$((used + caps + pw))
     plain_width "$ctx_pill_cap"; used=$((used + pw))
@@ -2384,7 +2423,6 @@ fi
 if [ "$ctx_bar" = 1 ]; then
   make_bar "$context_pct" "${ctx_label}${ctx_value}" "$context_color" "" "" "$ctx_trail" "$ctx_lead" "$ctx_pill_bg"
   context_text="${bar}${ctx_trail}${ctx_pill_cap}"
-  [ -n "$ctx_pill_bg" ] || context_text="${bar}${ctx_trail}${RESET}"
 fi
 if [ "$usage_bar" = 1 ]; then
   # The pace marker's cell, now the bar has a width. Clock in the first cell, same trick as the model mark: rides inside

@@ -607,6 +607,24 @@ case "$(edit_at "$WORK/elsewhere/plan.md")" in
   *) echo "  FAIL -- an edit outside every repo blanked the branch"; exit 1 ;;
 esac
 
+# Ultracode is only in the transcript, and the last marker is the state Claude Code itself goes by. The edit rides the
+# same scan, so it has to survive alongside.
+ultra_at() {  # <attachment type>... -> the line rendered with an edit and then those markers in the transcript
+  local a
+  printf '{"name":"Edit","input":{"file_path":"%s"}}\n' "$WORK/repo/src/a.js" > "$WORK/ultra.jsonl"
+  for a in "$@"; do printf '{"type":"attachment","attachment":{"type":"%s"}}\n' "$a" >> "$WORK/ultra.jsonl"; done
+  (cd "$WORK/elsewhere" && HOME="$host_home" ULTRACODE_ICON=ULTRA bash "$ROOT/statusline.sh" \
+    <<< "${fit_payload/\"session_id\"/\"transcript_path\":\"$WORK/ultra.jsonl\",\"session_id\"}") | strip
+}
+case "$(ultra_at ultra_effort_enter)" in
+  *main*ULTRA*) echo "  OK -- ultracode shows from the transcript, beside the edit's branch" ;;
+  *) echo "  FAIL -- ultracode on: $(ultra_at ultra_effort_enter)"; exit 1 ;;
+esac
+case "$(ultra_at ultra_effort_enter ultra_effort_exit)" in
+  *ULTRA*) echo "  FAIL -- ultracode still showing after its exit marker"; exit 1 ;;
+  *) echo "  OK -- ultracode goes dark at its exit marker" ;;
+esac
+
 # %p is the locale's word, empty in de_DE, which once turned every morning reset into pm.
 morning=$(perl -MPOSIX -e 'my @t = localtime($ARGV[0]); print mktime(0, 50, 7, $t[3], $t[4], $t[5])' "$CLAUDE_STATUSLINE_NOW")
 de="$(HOME="$host_home" LC_ALL=de_DE.UTF-8 CLAUDE_STATUSLINE_NOW=$((morning - 3600)) bash "$ROOT/statusline.sh" \

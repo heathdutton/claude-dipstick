@@ -146,6 +146,9 @@ frame() {
   fi
   payload=$(printf '{"hook_event_name":"Status","session_id":"preview","cwd":"%s","model":{"id":"%s","display_name":"%s"},"workspace":{"current_dir":"%s","project_dir":"%s"}%s,"cost":{"total_cost_usd":%s},"context_window":{"current_usage":{"input_tokens":%d,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"context_window_size":200000}%s}' \
     "$dir" "$model" "$model" "$dir" "$dir" "$effort_json" "$cost" "$tokens" "$rl")
+  # Ultracode only reaches the script through the transcript, so a frame that wants it points at one.
+  [ -n "${frame_transcript:-}" ] \
+    && payload=${payload/\"session_id\"/\"transcript_path\":\"$frame_transcript\",\"session_id\"}
   out=$(cd "$dir" && printf '%s' "$payload" | HOME="$WORK/home" COLUMNS="$fcols" CLAUDE_STATUSLINE_NOW="$now" bash "$SL")
   frame_line_out=$out
   [ "${frame_render_only:-0}" = 1 ] && return 0
@@ -230,6 +233,13 @@ s_effort() {
     caption="effort $e, $n of 5 chevrons lit"
     frame claude-opus-5 "$e" 25 14 3000 6 $((2 * 86400)) 0 "$APP" "" "$hold"
   done
+  # Shown short of max, since it's a switch beside the level and not a step past it.
+  printf '{"type":"attachment","attachment":{"type":"ultra_effort_enter","reminderType":"full"}}\n' \
+    > "$WORK/ultracode.jsonl"
+  caption="ultracode on, at xhigh"
+  frame_transcript="$WORK/ultracode.jsonl"
+  frame claude-opus-5 xhigh 25 14 3000 6 $((2 * 86400)) 0 "$APP" "" "$hold"
+  frame_transcript=""
   caption=""
 }
 s_models() {
