@@ -1,0 +1,12 @@
+{
+  "name": "claude-dipstick",
+  "owner": { "name": "Heath Dutton" },
+  "metadata": { "description": "Mods for the claude-dipstick status line" },
+  "plugins": [
+    {
+      "name": "dipstick",
+      "source": "./mod",
+      "description": "Draws the agent panel's rows with the claude-dipstick status line"
+    }
+  ]
+}

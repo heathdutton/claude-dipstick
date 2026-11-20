@@ -8,3 +8,6 @@ __pycache__/
 # needs from cost, and the pace marker is an inline chip now, which says what a week of animation was failing to.
 images/cost.gif
 images/week.gif
+
+# Claude Code lays the mod API's declarations here when a session loads the mod, for the editor and tsc.
+mod/.claude-plugin/types/

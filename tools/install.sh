@@ -8,9 +8,9 @@
 # Two halves, both idempotent:
 #   1. ~/.claude/statusline.sh is symlinked at statusline.sh in this checkout,
 #      so a `git pull` here takes effect on the next render with no re-install.
-#   2. enable.py points statusLine (and subagentStatusLine) in
-#      ~/.claude/settings.json at that link, backing the file up first if it
-#      held someone else's command.
+#   2. enable.py points statusLine in ~/.claude/settings.json at that link,
+#      backing up someone else's command, and installs mod/ from here for
+#      the agent rows.
 #
 # Opt a machine out of the settings half with: touch ~/.claude/.no-repo-statusline
 set -uo pipefail
@@ -39,6 +39,7 @@ except Exception:
     print("unset")
 PY
 )"
+  printf 'mod       %s\n' "$(python3 "$HERE/enable.py" --status 2>/dev/null || echo '?')"
   exit 0
 fi
 
@@ -62,8 +63,8 @@ if command -v python3 >/dev/null 2>&1; then
   echo "  settings.json -- $(python3 "$HERE/enable.py" 2>&1 || echo 'left alone (see above)')"
 else
   echo "  no python3 -- add this to ~/.claude/settings.json by hand:"
-  echo '      "statusLine":         { "type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"", "refreshInterval": 60 },'
-  echo '      "subagentStatusLine": { "type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"" }'
+  echo '      "statusLine": { "type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"", "refreshInterval": 60 }'
+  echo "  then draw the agent rows with: claude plugin install dipstick --marketplace $ROOT"
 fi
 
 echo

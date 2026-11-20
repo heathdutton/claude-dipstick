@@ -13,8 +13,8 @@ Paste this into Claude Code and it does the rest:
 
 ```
 Install the status line from https://github.com/heathdutton/claude-dipstick: put statusline.sh at
-~/.claude/statusline.sh, then point statusLine (refreshInterval 60) and subagentStatusLine at it
-in ~/.claude/settings.json.
+~/.claude/statusline.sh, point statusLine (refreshInterval 60) at it in ~/.claude/settings.json, then
+run `claude plugin install dipstick --marketplace heathdutton/claude-dipstick` for the agent rows.
 ```
 
 ## Install
@@ -28,12 +28,20 @@ curl -fsSL https://raw.githubusercontent.com/heathdutton/claude-dipstick/main/st
 Then add this to `~/.claude/settings.json`:
 
 ```json
-"statusLine":         { "type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"", "refreshInterval": 60 },
-"subagentStatusLine": { "type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"" }
+"statusLine": { "type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"", "refreshInterval": 60 }
 ```
 
-`refreshInterval` keeps the reset clocks and pace markers moving while a session idles. The second line styles the
-agent panel's rows with the same script.
+`refreshInterval` keeps the reset clocks and pace markers moving while a session idles.
+
+The agent panel's rows come from a small mod that runs the same script. At the Claude Code prompt:
+
+```
+/plugin install dipstick --marketplace heathdutton/claude-dipstick
+```
+
+Or from a shell, `claude plugin install dipstick --marketplace heathdutton/claude-dipstick`. It needs the script above,
+and without it the rows stay Claude Code's own. Still have a `subagentStatusLine` from an older install? Delete it once
+the mod is in, since Claude Code is retiring that setting.
 
 ### Or clone it, if you want `git pull` to update it
 
@@ -42,8 +50,9 @@ git clone https://github.com/heathdutton/claude-dipstick ~/git/claude-dipstick
 bash ~/git/claude-dipstick/tools/install.sh
 ```
 
-That symlinks `~/.claude/statusline.sh` at the checkout and writes both settings keys, so a pull lands on the next
-render with no re-install. `bash tools/install.sh --check` says what's wired.
+That symlinks `~/.claude/statusline.sh` at the checkout, points `statusLine` at it, and installs the mod from the
+checkout (dropping an old `subagentStatusLine`). A pull shows up on the next render, and in the agent rows at the next
+session, with no re-install. `bash tools/install.sh --check` says what's wired.
 
 ### Fonts and color
 
@@ -131,9 +140,10 @@ its own state. Flip it in `/effort` and it shows with your next prompt, which is
 
 ![the coordinator's line, then a row per running agent](images/agents.gif)
 
-Claude Code draws a panel under the prompt while agents run, and `subagentStatusLine` hands it these rows. Each one is
-the same shape as the line above it. Model, effort run, and that agent's own context meter. Haiku sends no effort
-level, so its row has no chevrons.
+Claude Code draws a panel under the prompt while agents run, and the mod hands it these rows. Each one is the same
+shape as the line above it. Model, effort run, and that agent's own context meter. Haiku sends no effort level, so its
+row has no chevrons. Only the terminal gets them. The desktop app and VS Code keep their own rows, since they'd draw
+the Nerd Font shapes as boxes.
 
 ## Account, and what it costs
 

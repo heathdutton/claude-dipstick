@@ -1,0 +1,13 @@
+{
+  "name": "dipstick",
+  "version": "1.3.0",
+  "description": "Draws the agent panel's rows with the claude-dipstick status line",
+  "author": {
+    "name": "Heath Dutton"
+  },
+  "homepage": "https://github.com/heathdutton/claude-dipstick",
+  "license": "MIT",
+  "network": {
+    "hosts": []
+  }
+}

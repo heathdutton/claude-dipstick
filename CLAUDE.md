@@ -3,8 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 A status line for Claude Code. The product is one file, `statusline.sh`: no build, no dependencies, installed by
-copying or symlinking it to `~/.claude/statusline.sh`. `tools/` holds the installer, the test, and the generators for
-the README's images. README.md documents every element for users.
+copying or symlinking it to `~/.claude/statusline.sh`. `mod/` is the Claude Code mod that draws the agent panel's rows
+with that same script, listed by `.claude-plugin/marketplace.json` at the root. `tools/` holds the installer, the test,
+and the generators for the README's images. README.md documents every element for users.
 
 ## Commands
 
@@ -14,6 +15,9 @@ the README's images. README.md documents every element for users.
   `HOME=$(mktemp -d) COLUMNS=160 CLAUDE_STATUSLINE_NOW=1790000000 bash statusline.sh < payload.json`.
   Payload shapes are `payload()` and `fit_payload` in `tools/selftest.sh`. Export any config key for one run
   (`BAR_WIDTH=20`). Read it plain with `perl -pe 's/\e\]8;;[^\a]*\a//g; s/\e\[[0-9;:]*m//g'`.
+- `claude plugin test mod` runs the mod's tests, `claude plugin validate .` checks the marketplace and `claude plugin
+  validate mod` the plugin. The selftest runs all three when `claude` is on PATH. `claude --plugin-dir mod` loads a
+  working copy into one session.
 - `bash tools/preview.sh [scenario...]` plays the README animations; `--gif` (needs `agg`), `--callout` and `--social`
   rewrite `images/`. `python3 tools/icons.py` rewrites `images/icons/` (needs Pillow). A change to what an element
   draws usually means regenerating its scenario's GIF.
@@ -28,7 +32,8 @@ the README's images. README.md documents every element for users.
   `default_claude_max_20x`.
 - **Payload** parsed in a single `grep -oE` pass into `payload_*` globals. A new field extends that regex and its
   `case`, never a second grep.
-- **Two modes.** A `"tasks":[` in the payload means `subagentStatusLine`: one JSON line per agent row, then exit.
+- **Two modes.** A `"tasks":[` in the payload means the agent panel, answered with one JSON line per agent row and an
+  exit. The mod sends it the JSON `subagentStatusLine` used to, so the script can't tell the two apart.
   Otherwise elements are built, `fit_bars` gives the bars whatever `COLUMNS` leaves after everything else, and the
   bottom of the file assembles them in order, plus a task line from `~/.claude/tasks/<session_id>/`.
 - **Git** comes from reading `.git` files (HEAD, commondir, refs, packed-refs, origin URL) in `find_git` and after it.
@@ -53,3 +58,31 @@ the README's images. README.md documents every element for users.
   (`to_bg`).
 - New Nerd Font glyphs come from U+F0000 and up (`md-*`). macOS fonts shadow the BMP private-use range, and a glyph
   there can render as nothing.
+
+## The mod
+
+- **A thin adapter, on purpose.** `mod/hooks/register.ts` hooks `ui.render` for `AgentRow`, pipes the old payload
+  through the script and sets each row's `body`. The look lives in `statusline.sh` alone, and a second renderer in
+  TypeScript would need the bash config file read again.
+- **It runs in Claude Code's own module environment**: no Node, no DOM, everything through `$` (`$.process.run`,
+  `$.fs.exists`, `$.env.get`). The API's declarations are in `mod/.claude-plugin/types/` once a session has loaded it.
+- **One run per pass.** The engine asks once per row. Each row's props are recorded before the hook's first await, so
+  the rows of one pass share a payload and a run. The test that mounts two rows at once fails if that ever breaks.
+- **Terminal only.** Other surfaces raise `AgentRow` too and would draw the Nerd Font marks as boxes.
+- **Any failure passes `next(e)`**, so the engine's own row shows, and it's logged once per failing stretch.
+- **Tests stand in for the host**: `on('process.run')`, `on('fs.exists')` and `on('env.get')` beneath the mod, each
+  answering `{ value }`. Nothing real runs.
+- **`enable.py` installs it** from the checkout as a folder marketplace, which Claude Code reads from the folder
+  (`claude plugin list` says `Read from:`), so a pull reaches the next session. Our `subagentStatusLine` goes only once
+  that worked. Settings are read before the install, so a file that won't parse stops it before claude writes there,
+  and again after, since `claude plugin install` writes `enabledPlugins` there too.
+- **Claude Code refuses a folder install while the marketplace's name points at another source** ("already added from
+  a different source"), so `enable.py` removes that one first, be it the sync app's clone, a moved checkout or GitHub.
+- **A mod turned off in `/plugin` stays off.** `enable.py` checks that it's installed, never that it's on, and
+  `--status` says `disabled`.
+- **`claude plugin validate` never follows the marketplace's `source`.** It finds the hooks by looking in the folder, so
+  a wrong path passes. The selftest walks the entry to `plugin.json` and checks the name is `enable.py`'s `PLUGIN`.
+- **The selftest's `enable.py` cases run a stand-in `claude`** writing what the real one writes to
+  `known_marketplaces.json`, `installed_plugins.json` and `settings.json`. `find_claude` falls back to the usual install
+  paths, so the no-claude case patches it out rather than trimming PATH.
+- `mod/.claude-plugin/plugin.json`'s `version` is the release tag's. A GitHub install only updates when it changes.

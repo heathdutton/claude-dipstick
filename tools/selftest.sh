@@ -57,6 +57,11 @@ case "$statusline_cmd" in
   "") echo "  settings.json -- no statusLine set (run install.sh)" ;;
   *)  echo "  settings.json -- pointing elsewhere: $statusline_cmd" ;;
 esac
+# Claude Code warns that subagentStatusLine is deprecated for as long as the key is set, whoever set it.
+python3 -c 'import json, sys; sys.exit(0 if "subagentStatusLine" in json.load(open(sys.argv[1])) else 1)' \
+  "$HOME/.claude/settings.json" 2>/dev/null \
+  && echo "  settings.json -- still sets the deprecated subagentStatusLine (install.sh drops ours once the mod is in)"
+echo "  mod -- $(python3 "$ROOT/tools/enable.py" --status 2>/dev/null || echo 'unknown, enable.py failed')"
 
 # The same two layers statusline.sh reads, in order, so the glyphs these checks look for are the ones this machine
 # renders: the default table in statusline.sh, then the local file patching whichever keys it names. The local file is a
@@ -352,6 +357,221 @@ case "$unreadable_out" in
   *"$(printf '\xe2\x9c\x93')"*) echo "  FAIL -- claims clean on a repo git exits 128 on:"; printf '    %s\n' "$unreadable_out"; exit 1 ;;
   *) echo "  OK -- says nothing when git cannot read the repo" ;;
 esac
+
+echo ""
+echo "== agent-row mod =="
+# enable.py runs against a stand-in claude that writes what `claude plugin install` writes, so nothing real gets
+# installed. Each case gets a home of its own.
+mod_bin="$WORK/mod-bin"
+mkdir -p "$mod_bin"
+cat > "$mod_bin/claude" <<'PY'
+#!/usr/bin/env python3
+# Logs each call, then writes what `claude plugin install` and `claude plugin marketplace remove` write to the files
+# enable.py reads. A non-empty FAKE_CLAUDE_FAIL fails every call with that message.
+import json, os, sys
+from pathlib import Path
+
+args = sys.argv[1:]
+home = Path(os.environ["HOME"])
+with open(home / "claude-calls.log", "a") as log:
+    log.write(" ".join(args) + "\n")
+if os.environ.get("FAKE_CLAUDE_FAIL"):
+    sys.exit(print(os.environ["FAKE_CLAUDE_FAIL"], file=sys.stderr) or 1)
+
+def load(path, default):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return default
+
+files = {"known": home / ".claude/plugins/known_marketplaces.json",
+         "installed": home / ".claude/plugins/installed_plugins.json", "settings": home / ".claude/settings.json"}
+known = load(files["known"], {})
+installed = load(files["installed"], {"version": 2, "plugins": {}})
+settings = load(files["settings"], {})
+
+if args[:3] == ["plugin", "marketplace", "remove"]:
+    name = args[3]
+    known.pop(name, None)
+    installed["plugins"] = {k: v for k, v in installed["plugins"].items() if not k.endswith("@" + name)}
+    enabled = settings.get("enabledPlugins", {})
+    settings["enabledPlugins"] = {k: v for k, v in enabled.items() if not k.endswith("@" + name)}
+elif args[:2] == ["plugin", "install"] and "--marketplace" in args:
+    plugin, root = args[2], args[args.index("--marketplace") + 1]
+    name = load(Path(root) / ".claude-plugin/marketplace.json", {})["name"]
+    source = {"source": "directory", "path": root}
+    if name in known and known[name]["source"] != source:
+        sys.exit(print(f'Marketplace "{name}" is already added from a different source', file=sys.stderr) or 1)
+    known[name] = {"source": source, "installLocation": root}
+    installed["plugins"][f"{plugin}@{name}"] = [{"scope": "user", "installPath": root + "/mod"}]
+    settings.setdefault("enabledPlugins", {})[f"{plugin}@{name}"] = True
+    settings.setdefault("extraKnownMarketplaces", {})[name] = {"source": source}
+else:
+    sys.exit(2)
+
+for key, data in (("known", known), ("installed", installed), ("settings", settings)):
+    files[key].parent.mkdir(parents=True, exist_ok=True)
+    files[key].write_text(json.dumps(data, indent=2) + "\n")
+PY
+chmod +x "$mod_bin/claude"
+mod_root="$(cd "$ROOT" && pwd -P)"
+ours_line='{"type": "command", "command": "bash \"$HOME/.claude/statusline.sh\"", "refreshInterval": 60}'
+ours_rows='{"type": "command", "command": "bash \"$HOME/.claude/statusline.sh\""}'
+
+mod_home() {  # <name> [settings.json content] -> a new home holding only that
+  local h="$WORK/mod-$1"
+  mkdir -p "$h/.claude"
+  [ -n "${2:-}" ] && printf '%s\n' "$2" > "$h/.claude/settings.json"
+  printf '%s' "$h"
+}
+enable_in() {  # <home> [no-claude | failing-claude] -> what enable.py printed, both streams
+  local refuse=""
+  [ "${2:-}" = failing-claude ] && refuse="Error: directory marketplaces are blocked by policy"
+  if [ "${2:-}" = no-claude ]; then
+    # find_claude falls back to the usual install paths, so taking the stand-in off PATH would find the real one.
+    HOME="$1" python3 -B -c 'import sys
+sys.path.insert(0, sys.argv[1])
+sys.argv = sys.argv[:1]
+import enable
+enable.find_claude = lambda: None
+sys.exit(enable.main())' "$ROOT/tools" 2>&1
+  else
+    HOME="$1" PATH="$mod_bin:$PATH" FAKE_CLAUDE_FAIL="$refuse" python3 -B "$ROOT/tools/enable.py" 2>&1
+  fi
+}
+mod_status() { HOME="$1" python3 -B "$ROOT/tools/enable.py" --status 2>&1; }  # <home>
+calls() { cat "$1/claude-calls.log" 2>/dev/null; }  # <home> -> each claude call made there, one a line
+holds() {  # <home> <Python test over s, that home's settings, and e, enable.py> -> exit 0 when it's true
+  python3 -B -c 'import json, sys
+sys.path.insert(0, sys.argv[1])
+import enable as e
+s = json.load(open(sys.argv[2] + "/.claude/settings.json"))
+sys.exit(0 if eval("(" + sys.argv[3] + ")") else 1)' "$ROOT/tools" "$1" "$2"
+}
+mod_fail() { echo "  FAIL -- $1"; exit 1; }
+install_call="plugin install dipstick --marketplace $mod_root --scope user"
+
+h="$(mod_home fresh)"
+out="$(enable_in "$h")"
+[ "$out" = "installed the agent-row mod, enabled" ] || mod_fail "a fresh home said: $out"
+[ "$(calls "$h")" = "$install_call" ] || mod_fail "a fresh home called claude as: $(calls "$h")"
+holds "$h" 's["statusLine"] == e.DESIRED and "subagentStatusLine" not in s
+  and s["enabledPlugins"] == {"dipstick@claude-dipstick": True}' \
+  || mod_fail "a fresh home's settings: $(cat "$h/.claude/settings.json")"
+echo "  OK -- a fresh home gets the line and the mod, and keeps what the install wrote to settings"
+out="$(enable_in "$h")"
+[ "$out" = "already set" ] && [ "$(calls "$h")" = "$install_call" ] \
+  || mod_fail "a second run said '$out' and called claude as: $(calls "$h")"
+echo "  OK -- a second run changes nothing and never calls claude"
+[ "$(mod_status "$h")" = "dipstick@claude-dipstick, read from $mod_root/mod" ] \
+  || mod_fail "--status says: $(mod_status "$h")"
+echo "  OK -- --status names the folder the mod is read from"
+
+# Turning it off in /plugin is the user's call, and a later run must not turn it back on.
+holds "$h" 's["enabledPlugins"]["dipstick@claude-dipstick"]' || mod_fail "no enabledPlugins entry to turn off"
+python3 -c 'import json, sys
+p = sys.argv[1] + "/.claude/settings.json"; s = json.load(open(p))
+s["enabledPlugins"]["dipstick@claude-dipstick"] = False; json.dump(s, open(p, "w"))' "$h"
+out="$(enable_in "$h")"
+[ "$out" = "already set" ] && holds "$h" 's["enabledPlugins"]["dipstick@claude-dipstick"] is False' \
+  || mod_fail "a mod turned off came back on, saying: $out"
+case "$(mod_status "$h")" in
+  *", disabled") echo "  OK -- a mod turned off stays off, and --status says so" ;;
+  *) mod_fail "--status on a mod turned off: $(mod_status "$h")" ;;
+esac
+
+h="$(mod_home upgrade "{\"statusLine\": $ours_line, \"subagentStatusLine\": $ours_rows}")"
+out="$(enable_in "$h")"
+[ "$out" = "installed the agent-row mod, dropped subagentStatusLine" ] || mod_fail "an old install said: $out"
+holds "$h" '"subagentStatusLine" not in s and s["statusLine"] == e.DESIRED' \
+  || mod_fail "an old install's settings: $(cat "$h/.claude/settings.json")"
+ls "$h/.claude/"settings.json.bak.* > /dev/null 2>&1 || mod_fail "settings rewritten with no backup"
+echo "  OK -- an install from before the mod loses its subagentStatusLine once the mod is in, backed up first"
+
+theirs_rows='{"type": "command", "command": "my-rows.sh"}'
+h="$(mod_home theirs "{\"statusLine\": $ours_line, \"subagentStatusLine\": $theirs_rows}")"
+out="$(enable_in "$h")"
+[ "$out" = "installed the agent-row mod, kept a subagentStatusLine that isn't ours (my-rows.sh)" ] \
+  && holds "$h" 's["subagentStatusLine"]["command"] == "my-rows.sh"' || mod_fail "someone else's rows: $out"
+echo "  OK -- someone else's subagentStatusLine stays, and the run says so"
+
+# Claude Code refuses an install from this folder while the name points at another, so the old one goes first.
+h="$(mod_home elsewhere)"
+mkdir -p "$h/.claude/plugins"
+printf '{"claude-dipstick": {"source": {"source": "directory", "path": "%s"}}}\n' "$WORK/old-clone" \
+  > "$h/.claude/plugins/known_marketplaces.json"
+printf '{"version": 2, "plugins": {"dipstick@claude-dipstick": [{"scope": "user"}]}}\n' \
+  > "$h/.claude/plugins/installed_plugins.json"
+[ "$(mod_status "$h")" = "dipstick@claude-dipstick, read from $WORK/old-clone" ] \
+  || mod_fail "--status on a mod from another folder: $(mod_status "$h")"
+out="$(enable_in "$h")"
+[ "$out" = "installed the agent-row mod, enabled" ] \
+  && [ "$(calls "$h")" = "plugin marketplace remove claude-dipstick
+$install_call" ] && [ "$(mod_status "$h")" = "dipstick@claude-dipstick, read from $mod_root/mod" ] \
+  || mod_fail "a mod from another folder: '$out', then $(mod_status "$h"), after: $(calls "$h")"
+echo "  OK -- a same-named marketplace in another folder is removed, and the mod comes from here"
+
+# Where the mod can't go in, the deprecated key keeps the rows styled for as long as Claude Code reads it.
+for how in failing-claude no-claude; do
+  h="$(mod_home "$how")"
+  out="$(enable_in "$h" "$how")"
+  rc=$?
+  case "$how" in
+    failing-claude) said="Error: directory marketplaces are blocked by policy" ;;
+    no-claude) said="no claude command" ;;
+  esac
+  [ "$rc" = 0 ] && [ "$out" = "mod not installed: $said, enabled, added subagentStatusLine" ] \
+    && holds "$h" 's["subagentStatusLine"] == e.DESIRED_SUBAGENT' && [ "$(mod_status "$h")" = "not installed" ] \
+    || mod_fail "$how exited $rc, saying: $out"
+done
+[ -z "$(calls "$h")" ] || mod_fail "no claude, and still called: $(calls "$h")"
+echo "  OK -- a refused install, or no claude at all, leaves subagentStatusLine drawing the rows"
+
+h="$(mod_home broken '{ "statusLine": ')"
+cp "$h/.claude/settings.json" "$WORK/mod-broken.json"
+out="$(enable_in "$h")"
+rc=$?
+[ "$rc" = 1 ] && case "$out" in "cannot read settings.json"*) true ;; *) false ;; esac \
+  && [ -z "$(calls "$h")" ] && cmp -s "$h/.claude/settings.json" "$WORK/mod-broken.json" \
+  || mod_fail "a settings.json that won't parse: rc $rc, '$out', claude called as: $(calls "$h")"
+echo "  OK -- a settings.json that won't parse stops it before claude runs"
+
+h="$(mod_home optout '{"statusLine": {"type": "command", "command": "mine.sh"}}')"
+touch "$h/.claude/.no-repo-statusline"
+cp "$h/.claude/settings.json" "$WORK/mod-optout.json"
+out="$(enable_in "$h")"
+[ "$out" = "opted out (.no-repo-statusline)" ] && [ -z "$(calls "$h")" ] && [ ! -e "$h/.claude/plugins" ] \
+  && cmp -s "$h/.claude/settings.json" "$WORK/mod-optout.json" || mod_fail "the opt-out: $out"
+echo "  OK -- the opt-out leaves settings and plugins alone"
+
+# validate finds the hooks by looking in the folder and never follows the marketplace's source, so a wrong path there,
+# or a plugin renamed out from under enable.py, would pass it and only fail on a real install.
+python3 -B -c 'import json, sys
+sys.path.insert(0, sys.argv[1])
+import enable
+names = []
+for entry in json.loads((enable.ROOT / ".claude-plugin/marketplace.json").read_text())["plugins"]:
+    manifest = json.loads((enable.ROOT / entry["source"] / ".claude-plugin/plugin.json").read_text())
+    if manifest["name"] != entry["name"]:
+        sys.exit(entry["source"] + " holds " + manifest["name"] + ", listed as " + entry["name"])
+    names.append(entry["name"])
+if enable.PLUGIN not in names:
+    sys.exit("enable.py installs " + enable.PLUGIN + ", and the marketplace lists " + ", ".join(names))' \
+  "$ROOT/tools" 2>&1 || mod_fail "the marketplace, the mod and enable.py disagree"
+echo "  OK -- the marketplace leads to the mod enable.py installs"
+
+if command -v claude > /dev/null 2>&1; then
+  for target in "$ROOT" "$ROOT/mod"; do
+    v_out="$(claude plugin validate "$target" 2>&1)" \
+      || { echo "  FAIL -- claude plugin validate $target:"; printf '    %s\n' "$v_out"; exit 1; }
+  done
+  echo "  OK -- claude plugin validate passes the marketplace and the mod"
+  t_out="$(claude plugin test "$ROOT/mod" 2>&1)" \
+    || { echo "  FAIL -- claude plugin test:"; printf '    %s\n' "$t_out"; exit 1; }
+  echo "  OK -- the mod's own tests pass ($(printf '%s\n' "$t_out" | grep -c '(pass)') of them)"
+else
+  echo "  SKIP -- no claude on PATH to validate the mod or run its tests"
+fi
 
 echo ""
 echo "== worktree =="
