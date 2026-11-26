@@ -1,6 +1,6 @@
 {
   "name": "dipstick",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Draws the agent panel's rows with the claude-dipstick status line",
   "author": {
     "name": "Heath Dutton"

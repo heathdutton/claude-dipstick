@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
-import type { Engine } from 'claude-code/testing'
+import type { On, RenderElement } from 'claude-code'
+import type { Engine, Plugin } from 'claude-code/testing'
 
 type Answer = { exitCode: number; stdout: string; stderr?: string }
 type Surface = 'terminal' | 'desktop' | 'vscode' | 'mobile'
@@ -25,19 +25,21 @@ function rowsFor(stdin: string): Answer {
 
 // Stands in for the host beneath the mod: which files exist, what each run of the script answers, and the body the
 // mod hands the engine for each row.
-function host(on: On, { env = {}, files = [SCRIPT], answer = rowsFor }: {
+function host(on: On, { env = {}, files = [SCRIPT], answer = rowsFor, hold }: {
   env?: Record<string, string>
   files?: string[]
   answer?: (stdin: string) => Answer
+  hold?: (stdin: string) => Promise<void> | undefined
 } = {}) {
   const runs: { argv: readonly string[]; stdin: string }[] = []
   const bodies = new Map<string, string | undefined>()
   const logs: string[] = []
   on('env.get', (_, e) => ({ value: { CLAUDE_DIPSTICK_SCRIPT: SCRIPT, ...env }[e.name] || undefined }))
   on('fs.exists', (_, e) => ({ value: files.includes(e.path) }))
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
     const stdin = e.init?.stdin ?? ''
     runs.push({ argv: e.argv, stdin })
+    await hold?.(stdin)
     const { exitCode, stdout, stderr = '' } = answer(stdin)
     return { value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -120,7 +122,8 @@ test('a failing script keeps the engine row, is tried again, and is reported onc
   await row.redraw(agent('a1', ['a1']))
   expect(runs).toHaveLength(2)
   expect(logs).toHaveLength(1)
-  expect(logs[0]).toContain('exited 2: boom')
+  // The engine leads the line with the plugin's name.
+  expect(logs[0]).toBe(`${SCRIPT} exited 2: boom. Agent rows fall back to Claude Code's own until it runs clean.`)
   await row.unmount()
 })
 
@@ -132,3 +135,47 @@ test('a row the script leaves out, or answers with a bad line, keeps the engine 
   expect(bodies.get('a2')).toBeUndefined()
   for (const row of rows) await row.unmount()
 })
+
+// Answers a "cut" row from above the mod without waiting. The ask beneath is abandoned, as a re-asked row's is.
+const ABOVE: Plugin = {
+  name: 'above',
+  tier: 'prepend',
+  register(on) {
+    on('ui.render', { component: 'AgentRow' }, ($, e, next) => {
+      if (e.props.label !== 'cut') return next(e)
+      next(e).catch(() => undefined)
+      const { Text } = $.ui.resolve(e)
+      return h(Text, null, 'above') as RenderElement
+    })
+  },
+}
+
+test('a run the engine cuts short is run again for the rows still waiting, and never reported', { plugins: [ABOVE] },
+  async ($, on) => {
+    let held: (() => void) | undefined
+    const { runs, bodies, logs } = host(on, {
+      answer: stdin => {
+        if (!stdin.includes('"label":"cut"') || runs.length > 2) return rowsFor(stdin)
+        throw new Error('dipstick: $.process.run(bash) aborted')
+      },
+      hold: stdin => stdin.includes('"label":"cut"') && runs.length === 2
+        ? new Promise<void>(release => { held = release })
+        : undefined,
+    })
+    const ids = ['a1', 'a2']
+    const rows = await Promise.all(ids.map(id => mount($, 'terminal', id, ids)))
+    expect(runs).toHaveLength(1)
+
+    await rows[0]?.redraw({ ...agent('a1', ids), label: 'cut' })
+    const waiting = rows[1]?.redraw(agent('a2', ids))
+    for (let i = 0; i < 100; i++) await Promise.resolve()
+    expect(runs).toHaveLength(2)
+    held?.()
+    await waiting
+
+    expect(runs).toHaveLength(3)
+    expect(bodies.get('a2')).toBe('row a2')
+    expect(logs).toEqual([])
+    for (const row of rows) await row.unmount()
+  })
+

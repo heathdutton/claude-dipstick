@@ -9,6 +9,9 @@ type Rows = ReadonlyMap<string, string>
 type Reported = { failing: boolean }
 
 const NO_ROWS: Rows = new Map()
+// The engine kills a run when the ask that started it is abandoned, as when a row is asked again mid-run because its
+// label or token count moved. Not the script's doing, so it's never reported, and a row still waiting runs it again.
+const CUT: Rows = new Map()
 // A hung script costs a plain row for this long, never a stuck panel.
 const RUN_TIMEOUT_MS = 5000
 
@@ -34,16 +37,21 @@ export const register: Register = on => {
 
     const tasks = row.rowIds.flatMap(id => seen.get(id) ?? [])
     const payload = JSON.stringify({ hook_event_name: 'SubagentStatus', columns: row.columns ?? 80, tasks })
-    if (payload !== lastPayload) {
+    const start = () => {
       lastPayload = payload
-      lastRun = run($, script, payload, reported).then(rows => {
+      lastRun = run($, script, payload, next.signal, reported).then(rows => {
         // Retried at the next ask. Otherwise a failure stands until something on the panel changes.
-        if (rows === NO_ROWS && lastPayload === payload) lastPayload = ''
+        if ((rows === NO_ROWS || rows === CUT) && lastPayload === payload) lastPayload = ''
         return rows
       })
+      return lastRun
     }
+    const shared = payload === lastPayload ? lastRun : start()
+    let rows = await shared
+    // Only the first row back from a cut run starts another. The rest wait on that one.
+    if (rows === CUT && !next.signal.aborted) rows = await (lastRun === shared ? start() : lastRun)
 
-    const body = (await lastRun).get(row.id)
+    const body = rows.get(row.id)
     return body === undefined ? next(e) : next({ ...e, props: { ...row, body } })
   })
 }
@@ -70,7 +78,8 @@ async function findScript($: EngineInterface): Promise<string | undefined> {
   return undefined
 }
 
-async function run($: EngineInterface, script: string, payload: string, reported: Reported): Promise<Rows> {
+async function run($: EngineInterface, script: string, payload: string, signal: AbortSignal,
+  reported: Reported): Promise<Rows> {
   let failure: string
   try {
     const result = await $.process.run(['bash', script], { stdin: payload, timeoutMs: RUN_TIMEOUT_MS })
@@ -80,12 +89,15 @@ async function run($: EngineInterface, script: string, payload: string, reported
     }
     failure = `exited ${result.exitCode}: ${firstLine(result.stderr)}`
   } catch (error) {
+    if (signal.aborted) return CUT
     failure = error instanceof Error ? error.message : String(error)
   }
   // Said once per failing stretch. The engine asks every few seconds, and each ask would say it again.
+  // The engine leads every log line with the plugin's name, and its own errors too.
   if (!reported.failing) {
     reported.failing = true
-    $.ui.log(`dipstick: ${script} ${failure}. Agent rows fall back to Claude Code's own until it runs clean.`)
+    const said = failure.startsWith(`${$.plugin.name}: `) ? failure.slice($.plugin.name.length + 2) : failure
+    $.ui.log(`${script} ${said}. Agent rows fall back to Claude Code's own until it runs clean.`)
   }
   return NO_ROWS
 }
